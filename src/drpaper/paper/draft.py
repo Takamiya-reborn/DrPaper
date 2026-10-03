@@ -1,26 +1,77 @@
-"""草稿模型：正文 Markdown + 真实文献库，负责引用一致性与落盘。"""
+"""草稿模型：题目 + 分节正文 + 真实文献库，负责引用一致性与落盘。"""
 
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from drpaper.literature.base import Paper
-from drpaper.paper.markdown_parser import TitleNode, extract_citations, parse
+from drpaper.paper.markdown_parser import extract_citations, parse
+from drpaper.paper.wordcount import count_chars
 
-# 正文中的参考文献章节：导出时由文献库统一生成，提交时移除以免重复
-_REFERENCE_SECTION = re.compile(r"^\s*#{1,6}\s*参考文献\s*$.*", re.MULTILINE | re.DOTALL)
+# 这些节渲染为粗体段落而非节标题（与结构模板一致）
+_BOLD_SECTIONS = {"摘要", "关键词"}
+
+
+@dataclass
+class Section:
+    """大纲中的一节：名称、字数预算与已提交内容。"""
+
+    name: str
+    budget: int  # 字数预算；0 表示不限字数（如"关键词"）
+    content: str = ""
 
 
 class Draft:
-    """一篇论文的当前状态：正文（Markdown）与文献库（编号从 1 开始）。"""
+    """一篇论文的当前状态：题目、分节正文与文献库（编号从 1 开始）。"""
 
     def __init__(self) -> None:
+        self.title: str = ""
+        self.sections: list[Section] = []
         self.markdown: str = ""
         self.references: list[Paper] = []
         self._uid_to_index: dict[str, int] = {}
+
+    # ---- 大纲与分节 ----
+
+    def begin(self, title: str, sections: list[Section]) -> None:
+        """重置题目与分节状态，重新起草；文献库保留。"""
+        self.title = title
+        self.sections = sections
+
+    def get_section(self, name: str) -> Section:
+        """按名称精确取节，找不到时抛出带可用节名的 KeyError。"""
+        for section in self.sections:
+            if section.name == name:
+                return section
+        names = "、".join(s.name for s in self.sections)
+        raise KeyError(f"节名不在大纲中: {name}（可用节名: {names}）")
+
+    def missing_sections(self) -> list[str]:
+        """尚未提交内容的节名列表。"""
+        return [s.name for s in self.sections if not s.content]
+
+    def section_chars(self, name: str) -> int:
+        """某节实际字数。"""
+        return count_chars(self.get_section(name).content)
+
+    def total_chars(self) -> int:
+        """全文实际字数（按各节已提交内容统计）。"""
+        return sum(count_chars(s.content) for s in self.sections)
+
+    def build_markdown(self) -> None:
+        """按大纲顺序拼接全文写入 self.markdown。
+
+        首行为 `# 题目`；摘要/关键词渲染为粗体段落，其余节为 `## 节名`。
+        """
+        parts = [f"# {self.title}"]
+        for section in self.sections:
+            if section.name in _BOLD_SECTIONS:
+                parts.append(f"**{section.name}**：{section.content}")
+            else:
+                parts.append(f"## {section.name}\n\n{section.content}")
+        self.markdown = "\n\n".join(parts) + "\n"
 
     # ---- 文献库 ----
 
@@ -53,24 +104,14 @@ class Draft:
         self._uid_to_index = {p.uid: i for i, p in enumerate(kept, start=1)}
         return (
             f"已移除 {removed} 条文献，剩余 {len(kept)} 条，编号已重排。"
-            "正文中的引用编号须相应更新后重新 submit_draft。"
+            "请更新各节正文中的引用编号后重新 submit_section 提交受影响的节，再 finish_draft。"
         )
 
     def reference_lines(self) -> list[str]:
         """按编号生成参考文献条目。"""
         return [p.reference_line(i + 1) for i, p in enumerate(self.references)]
 
-    # ---- 正文 ----
-
-    def title(self) -> str:
-        """从正文提取论文题目（首个 `# 标题` 行），未写标题时返回空串。"""
-        for node in parse(self.markdown):
-            if isinstance(node, TitleNode):
-                return node.text
-        return ""
-
-    def set_markdown(self, markdown: str) -> None:
-        self.markdown = _REFERENCE_SECTION.sub("", markdown).strip() + "\n"
+    # ---- 引用校验 ----
 
     def citation_errors(self) -> list[str]:
         """校验正文引用与文献库一致；返回问题描述列表（空表示通过）。"""
