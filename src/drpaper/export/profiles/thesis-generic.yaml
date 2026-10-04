@@ -12,6 +12,7 @@ sizes:
   heading1: { zh: 四号, pt: 14 }   # 一级节标题
   body: { zh: 小四, pt: 12 }       # 正文/二级节标题/摘要
   reference: { zh: 五号, pt: 10.5 } # 参考文献
+  table: { zh: 五号, pt: 10.5 }    # 表格与表题
 
 page:
   margin_cm: 2.54

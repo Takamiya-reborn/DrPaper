@@ -30,6 +30,7 @@ class StyleProfile:
     heading1_pt: float
     body_pt: float
     reference_pt: float
+    table_pt: float
     margin_cm: float
     line_spacing: float
     first_line_indent_chars: int
@@ -85,6 +86,8 @@ def _parse(path: Path) -> StyleProfile:
             heading1_pt=float(data["sizes"]["heading1"]["pt"]),
             body_pt=float(data["sizes"]["body"]["pt"]),
             reference_pt=float(data["sizes"]["reference"]["pt"]),
+            # 旧档案可能没有 table 字段，回退为参考文献字号（同为五号）
+            table_pt=float(data["sizes"].get("table", {}).get("pt", data["sizes"]["reference"]["pt"])),
             margin_cm=float(data["page"]["margin_cm"]),
             line_spacing=float(data["paragraph"]["line_spacing"]),
             first_line_indent_chars=int(data["paragraph"]["first_line_indent_chars"]),

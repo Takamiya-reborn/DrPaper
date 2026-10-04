@@ -5,13 +5,37 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from drpaper.literature.base import Paper
-from drpaper.paper.markdown_parser import extract_citations, parse
+from drpaper.paper.markdown_parser import (
+    HeadingNode,
+    ParagraphNode,
+    TableNode,
+    TitleNode,
+    extract_citations,
+    parse,
+)
 from drpaper.paper.wordcount import count_chars
 
 # 这些节渲染为粗体段落而非节标题（与结构模板一致）
 _BOLD_SECTIONS = {"摘要", "关键词"}
+
+# 节字数/全文字数允许低于预算/目标的比例下限
+MIN_BUDGET_RATIO = 0.85
+
+# 节字数允许超出预算的比例上限（防止正文漂向模型自然尺度）
+MAX_BUDGET_RATIO = 1.3
+
+
+def _node_text(node: TitleNode | HeadingNode | ParagraphNode | TableNode) -> str:
+    """提取节点中的纯文本（含表格表题与单元格），供引用校验与统计。"""
+    if isinstance(node, TableNode):
+        cells = [node.caption, *node.header, *(c for row in node.rows for c in row)]
+        return " ".join(cells)
+    if isinstance(node, (TitleNode, HeadingNode)):
+        return node.text
+    return "".join(t for t, _ in node.runs)
 
 
 @dataclass
@@ -21,6 +45,33 @@ class Section:
     name: str
     budget: int  # 字数预算；0 表示不限字数（如"关键词"）
     content: str = ""
+
+    def too_short(self, content: str) -> bool:
+        """提交内容是否低于字数预算下限；不限字数的节恒为否。"""
+        return self.budget > 0 and count_chars(content) < self.budget * MIN_BUDGET_RATIO
+
+    def too_long(self, content: str) -> bool:
+        """提交内容是否超出字数预算上限；不限字数的节恒为否。"""
+        return self.budget > 0 and count_chars(content) > self.budget * MAX_BUDGET_RATIO
+
+
+def parse_outline(raw: Any) -> list[Section]:
+    """把 LLM 提交的大纲 JSON（[{name, budget}, ...]）解析为 Section 列表。
+
+    节名为空或重复时抛 ValueError；budget 为负数时截为 0。
+    """
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("sections 不能为空")
+    names = [str(s.get("name", "")).strip() for s in raw]
+    if any(not name for name in names):
+        raise ValueError("存在空节名")
+    duplicated = sorted({n for n in names if names.count(n) > 1})
+    if duplicated:
+        raise ValueError(f"节名重复: {'、'.join(duplicated)}")
+    return [
+        Section(name=name, budget=max(0, int(s.get("budget", 0))))
+        for name, s in zip(names, raw)
+    ]
 
 
 class Draft:
@@ -59,6 +110,18 @@ class Draft:
     def total_chars(self) -> int:
         """全文实际字数（按各节已提交内容统计）。"""
         return sum(count_chars(s.content) for s in self.sections)
+
+    def short_sections(self) -> list[Section]:
+        """字数低于预算下限的节，按大纲顺序（防御性复核用）。"""
+        return [s for s in self.sections if s.too_short(s.content)]
+
+    def long_sections(self) -> list[Section]:
+        """字数超出预算上限的节，按大纲顺序（防御性复核用）。"""
+        return [s for s in self.sections if s.too_long(s.content)]
+
+    def total_too_short(self, target: int) -> bool:
+        """全文字数是否低于目标字数下限。"""
+        return self.total_chars() < target * MIN_BUDGET_RATIO
 
     def build_markdown(self) -> None:
         """按大纲顺序拼接全文写入 self.markdown。
@@ -121,11 +184,9 @@ class Draft:
         total = len(self.references)
         cited: set[int] = set()
         for node in parse(self.markdown):
-            text = getattr(node, "text", "")
-            if not text:
-                runs = getattr(node, "runs", [])
-                text = "".join(t for t, _ in runs)
-            cited |= extract_citations(text)
+            text = _node_text(node)
+            if text:
+                cited |= extract_citations(text)
         for n in sorted(cited):
             if n < 1 or n > total:
                 errors.append(f"正文引用了 [{n}]，但文献库中没有该编号（当前共 {total} 条）。")

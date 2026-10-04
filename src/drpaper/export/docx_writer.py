@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from docx import Document
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
+from docx.table import Table as DocxTable
 
 from drpaper.export.guides import guide_for_heading
 from drpaper.export.style_profile import StyleProfile, load_profile
@@ -16,6 +18,7 @@ from drpaper.paper.markdown_parser import (
     HeadingNode,
     Node,
     ParagraphNode,
+    TableNode,
     TitleNode,
     parse,
 )
@@ -42,6 +45,8 @@ def export_docx(
             _add_title(document, node.text, profile)
         elif isinstance(node, HeadingNode):
             _add_heading(document, node, profile)
+        elif isinstance(node, TableNode):
+            _add_table(document, node, profile)
         elif isinstance(node, ParagraphNode):
             _add_paragraph(document, node.runs, profile)
 
@@ -100,6 +105,66 @@ def _add_paragraph(document: Document, runs: list[tuple[str, bool]], profile: St
     )
     for text, bold in runs:
         _set_fonts(paragraph.add_run(text), profile, profile.cn_body_font, profile.body_pt, bold=bold)
+
+
+def _add_table(document: Document, node: TableNode, profile: StyleProfile) -> None:
+    """渲染学术三线表：表题居中加粗，顶线/底线 1.5pt，表头下线 0.75pt，无竖线。"""
+    if node.caption:
+        caption = document.add_paragraph()
+        caption.alignment = ALIGN_CENTER
+        caption.paragraph_format.line_spacing = profile.line_spacing
+        _set_fonts(
+            caption.add_run(node.caption),
+            profile,
+            profile.cn_body_font,
+            profile.table_pt,
+            bold=True,
+        )
+    table = document.add_table(rows=len(node.rows) + 1, cols=len(node.header))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_borders(table)
+    for col, text in enumerate(node.header):
+        _set_cell(table.cell(0, col), text, profile, bold=True)
+    for row, cells in enumerate(node.rows, start=1):
+        for col, text in enumerate(cells):
+            if col < len(node.header):
+                _set_cell(table.cell(row, col), text, profile)
+
+
+def _set_table_borders(table: DocxTable) -> None:
+    """写 tblBorders XML：仅顶线与底线（三线表外框），竖线一律不加。"""
+    borders = table._tbl.tblPr.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = table._tbl.tblPr.makeelement(qn("w:tblBorders"), {})
+        table._tbl.tblPr.append(borders)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        element = borders.find(qn(f"w:{edge}"))
+        if element is None:
+            element = borders.makeelement(qn(f"w:{edge}"), {})
+            borders.append(element)
+        visible = edge in ("top", "bottom")
+        element.set(qn("w:val"), "single" if visible else "none")
+        if visible:
+            element.set(qn("w:sz"), "12")  # 1/8 pt 为单位，12 = 1.5pt
+            element.set(qn("w:color"), "000000")
+    # 表头行下线：逐单元格写 tcBorders
+    for cell in table.rows[0].cells:
+        tc_pr = cell._tc.get_or_add_tcPr()
+        tc_borders = tc_pr.makeelement(qn("w:tcBorders"), {})
+        bottom = tc_borders.makeelement(qn("w:bottom"), {})
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "6")  # 0.75pt
+        bottom.set(qn("w:color"), "000000")
+        tc_borders.append(bottom)
+        tc_pr.append(tc_borders)
+
+
+def _set_cell(cell, text: str, profile: StyleProfile, bold: bool = False) -> None:
+    """填充单元格：水平居中、表格字号、统一中英文字体。"""
+    paragraph = cell.paragraphs[0]
+    paragraph.alignment = ALIGN_CENTER
+    paragraph.paragraph_format.line_spacing = 1.0
+    _set_fonts(paragraph.add_run(text), profile, profile.cn_body_font, profile.table_pt, bold=bold)
 
 
 def _add_references(document: Document, references: list[Paper], profile: StyleProfile) -> None:

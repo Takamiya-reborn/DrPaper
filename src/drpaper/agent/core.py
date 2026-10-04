@@ -6,15 +6,19 @@ import re
 from dataclasses import dataclass, field
 
 from drpaper.agent.prompts import build_system_prompt
-from drpaper.agent.tools import TOOL_SCHEMAS, ToolBox
+from drpaper.agent.schemas import TOOL_SCHEMAS
+from drpaper.agent.tools import ToolBox
 from drpaper.export.style_profile import StyleProfile
 from drpaper.literature.arxiv import ArxivProvider
 from drpaper.llm.client import ChatCallbacks, LLMClient
 from drpaper.paper.draft import Draft
 from drpaper.skills.manager import SkillManager
 
-# 用户输入中的目标字数，如 "8000 字"
-_TARGET_PATTERN = re.compile(r"(\d{3,5})\s*字")
+# 用户输入中的目标字数，如 "8000 字"、"1.5 万字"、"8000 词"
+# 两个分支：N 万（1~2 位数字，可带小数）或纯 N（3~6 位数字），避免误匹配"图 3 字样"之类
+_TARGET_PATTERN = re.compile(r"(?:([12]?\d(?:\.\d+)?)\s*万|(\d{3,6}))\s*[字词]")
+# 低于该值视为在描述摘要/局部篇幅而非全文目标
+_MIN_TARGET = 500
 
 
 @dataclass
@@ -66,11 +70,16 @@ class PaperAgent:
 
     def _sync_target(self, user_input: str) -> None:
         """解析用户输入中的目标字数，同步给工具校验与系统提示词。"""
-        match = _TARGET_PATTERN.search(user_input)
-        self.last_target_detected = match is not None
-        if not match:
+        matches = _TARGET_PATTERN.finditer(user_input)
+        values = [
+            int(float(wan) * 10000) if wan else int(plain)
+            for wan, plain in (m.groups() for m in matches)
+        ]
+        valid = [v for v in values if v >= _MIN_TARGET]
+        self.last_target_detected = bool(valid)
+        if not valid:
             return
-        target = int(match.group(1))
+        target = valid[0]
         if target == self.target_chars:
             return
         self.target_chars = target

@@ -5,6 +5,7 @@
 - `## 节`    —— 一级节标题
 - `### 小节` —— 二级节标题
 - 普通段落   —— 支持 `**粗体**` 行内标记与 `[n]` 引用标记
+- 管道表格   —— 表题行（`表 N：…`）+ 表头行 + `|---|` 分隔行 + 数据行
 """
 
 from __future__ import annotations
@@ -35,19 +36,33 @@ class ParagraphNode:
     kind: Literal["paragraph"] = "paragraph"
 
 
-Node = TitleNode | HeadingNode | ParagraphNode
+@dataclass(frozen=True)
+class TableNode:
+    """一个表格：表题（可为空）、表头与数据行。"""
+
+    caption: str
+    header: list[str]
+    rows: list[list[str]]
+    kind: Literal["table"] = "table"
+
+
+Node = TitleNode | HeadingNode | ParagraphNode | TableNode
 
 _BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
 _CITATION_PATTERN = re.compile(r"\[(\d{1,3}(?:,\s*\d{1,3})*)\]")
+
+# 表题行：如"表 1：各方法性能对比"
+_CAPTION_PATTERN = re.compile(r"^表\s*\d*\s*[:：]")
 
 
 def parse(markdown: str) -> list[Node]:
     """把草稿 Markdown 解析为节点列表。"""
     nodes: list[Node] = []
     buffer: list[str] = []
-
-    for raw_line in markdown.splitlines():
-        line = raw_line.rstrip()
+    lines = markdown.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
         if line.startswith("### "):
             _flush(buffer, nodes)
             nodes.append(HeadingNode(text=line[4:].strip(), level=2))
@@ -57,12 +72,65 @@ def parse(markdown: str) -> list[Node]:
         elif line.startswith("# "):
             _flush(buffer, nodes)
             nodes.append(TitleNode(text=line[2:].strip()))
+        elif _is_table_start(line, lines[i + 1 : i + 2]):
+            _flush(buffer, nodes)
+            caption = _pop_caption(nodes)
+            i = _parse_table(line, lines[i + 1 :], nodes, caption) + i
         elif line.strip():
             buffer.append(line.strip())
         else:
             _flush(buffer, nodes)
+        i += 1
     _flush(buffer, nodes)
     return nodes
+
+
+def _is_table_start(line: str, next_lines: list[str]) -> bool:
+    """该行是否为表格首行（管道行且次行为分隔行）。"""
+    if not line.lstrip().startswith("|"):
+        return False
+    return bool(next_lines) and _is_separator(next_lines[0].strip())
+
+
+def _is_separator(line: str) -> bool:
+    """是否为 Markdown 表格分隔行，如 `| --- | --- |`。"""
+    return bool(re.fullmatch(r"\|(\s*:?-+:?\s*\|)+", line))
+
+
+def _pop_caption(nodes: list[Node]) -> str:
+    """若节点列表末尾是表题段落（如"表 1：…"）则弹出并返回其文本，否则返回空串。
+
+    表题与表格间允许有空行：表题先被 flush 成普通段落，此处回收挂到表格上。
+    """
+    if nodes and isinstance(nodes[-1], ParagraphNode):
+        runs = nodes[-1].runs
+        if len(runs) == 1 and not runs[0][1] and _CAPTION_PATTERN.match(runs[0][0]):
+            return nodes.pop().runs[0][0]
+    return ""
+
+
+def _parse_table(first: str, rest: list[str], nodes: list[Node], caption: str) -> int:
+    """从表头行起收集整个表块，追加 TableNode；返回已消费的行数（不含表头行）。"""
+    header = _split_row(first)
+    rows: list[list[str]] = []
+    consumed = 0
+    for line in rest:
+        stripped = line.strip()
+        if _is_separator(stripped):
+            consumed += 1
+            continue
+        if not stripped.startswith("|"):
+            break
+        rows.append(_split_row(stripped))
+        consumed += 1
+    nodes.append(TableNode(caption=caption, header=header, rows=rows))
+    return consumed
+
+
+def _split_row(line: str) -> list[str]:
+    """把表格行按竖线拆成单元格，去掉首尾空管道与单元格空白。"""
+    parts = line.strip().strip("|").split("|")
+    return [p.strip() for p in parts]
 
 
 def parse_runs(text: str) -> list[tuple[str, bool]]:

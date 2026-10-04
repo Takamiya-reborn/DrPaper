@@ -53,6 +53,8 @@ class SkillManager:
                 elif strict:
                     print(f"[警告] 跳过无效 skill（缺少 name/description）: {path}", file=sys.stderr)
         self.skills = list(by_name.values())
+        # 本会话已加载过完整正文的 skill 名，避免重复加载把全文再灌一遍历史
+        self._loaded: set[str] = set()
 
     def index_prompt(self) -> str:
         """生成注入系统提示词的紧凑索引：每条仅名称与触发时机。"""
@@ -67,12 +69,27 @@ class SkillManager:
         _, body = _parse_frontmatter(target.read_text(encoding="utf-8"))
         return body
 
+    def load_once(self, name: str, file: str | None = None) -> str:
+        """加载 skill 内容；整篇正文（file=None）会话内去重，参考文件不去重。"""
+        content = self.load(name, file)
+        if file is not None:
+            return content
+        if name in self._loaded:
+            return f"skill「{name}」的完整内容已在本会话上下文中，无需重复加载。"
+        self._loaded.add(name)
+        return content
+
     def _reference_path(self, skill: Skill, file: str) -> Path:
-        """解析 skill 目录内的参考文件路径，禁止越出目录。"""
+        """解析 skill 目录内的参考文件路径，禁止越出目录。
+
+        约定 references 文件按裸文件名传入（如 'sections.md'），
+        优先在 references/ 下解析，兼容直接传相对路径的用法。
+        """
         root = skill.path.parent
-        target = (root / file).resolve()
-        if not target.is_relative_to(root.resolve()):
-            raise ValueError(f"非法路径: {file}")
-        if not target.is_file():
-            raise FileNotFoundError(f"参考文件不存在: {file}")
-        return target
+        candidates = [root / "references" / file, root / file]
+        for target in (c.resolve() for c in candidates):
+            if not target.is_relative_to(root.resolve()):
+                raise ValueError(f"非法路径: {file}")
+            if target.is_file():
+                return target
+        raise FileNotFoundError(f"参考文件不存在: {file}")
