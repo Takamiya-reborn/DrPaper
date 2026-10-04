@@ -1,6 +1,19 @@
+<div align="center">
+
 # DrPaper
 
-中文学术写作 Agent。基于 LLM tool-calling，多源检索真实文献（arXiv / OpenAlex / Semantic Scholar，按权威性分层调度）并生成结构规范、格式合规的中文论文初稿（Word 格式），供初学者模仿修改；同时提供论文诊断、润色、查新、实验设计与研究指导能力。
+**中文学术写作 Agent** —— 多源检索真实文献，生成结构规范、可查证的中文论文初稿
+
+[![Python](https://img.shields.io/badge/Python-3.13+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![uv](https://img.shields.io/badge/uv-依赖管理-DE5FE9?logo=uv&logoColor=white)](https://docs.astral.sh/uv/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-兼容接口-412991?logo=openai&logoColor=white)](https://pypi.org/project/openai/)
+[![arXiv](https://img.shields.io/badge/arXiv-文献检索-B31B1B?logo=arxiv&logoColor=white)](https://arxiv.org/)
+[![Word](https://img.shields.io/badge/Word-docx导出-2A5699?logo=microsoftword&logoColor=white)](https://pypi.org/project/python-docx/)
+[![License](https://img.shields.io/github/license/Takamiya-reborn/DrPaper)](./LICENSE)
+
+</div>
+
+基于 LLM tool-calling，多源检索真实文献（arXiv / OpenAlex / Semantic Scholar，按权威性分层调度）并生成结构规范、格式合规的中文论文初稿（Word 格式），供初学者模仿修改；同时提供论文诊断、润色、查新、实验设计与研究指导能力。
 
 ## 技术栈
 
@@ -61,6 +74,56 @@ uv run drpaper
 
 生成结果在 `.output/<论文题目>/` 目录：`<论文题目>.docx`（交付文档）、`draft.md`（正文源稿）、`references.json`（文献库）、`eval.json`（质量评分卡，起草流程自动生成）。
 
+## ⚠️ 数据必须替换与勘误（学术诚信底线）
+
+**表格中黄色高亮的†数值是写作参照，不是实验结果，论文里不允许留下任何一个。**
+
+- †区间是基于文献统计的**预期参考值**，不是你的实验数据。直接把它当作实验结果留在论文中，属于编造数据，是学术造假。完成实验后必须逐个替换为自己的实测值，并同步改写对应分析段——"预期 / 有望"的口径要改成实际结论
+- 预期区间的唯一用途是帮助你在动手实验前判断结果量级是否合理：如果实测远低于区间，先怀疑实验设置有误；如果确实达不到，如实报告并分析原因，这同样是正常且诚实的结果
+- 基线行的文献实测值虽可溯源至原文献，也须核对你复现时的版本、数据划分与评测协议是否一致，不一致时勘误并说明
+- "【待补充】"占位与预期区间一样，都必须在实验后补齐为真实数据
+- 生成的文本仅供学习论文结构与写法，作为正式成果提交前请务必核实所有引用内容
+
+## 质量评分与基线校准
+
+论文中的比较性表述很难自证"好多少"，本功能用一组**固定标准任务集**把论文质量变成分数：任务 ID 固定不变，评分卡带版本号，任何两次生成的结果都可以横向对比。
+
+**五个标准任务**
+
+| 任务                   | 评什么                                        | 方式                                |
+| ---------------------- | --------------------------------------------- | ----------------------------------- |
+| `claim_audit`          | 比较性断言是否有数字 / †区间 / [n] 引用支撑   | 确定性正则（可选 LLM 复核过滤误报） |
+| `citation_consistency` | 正文引用与文献库一致性                        | 确定性，复用导出前的校验            |
+| `structure_balance`    | 缺节、单节字数比越界、单节占全文比例超限      | 确定性                              |
+| `numeric_discipline`   | 表格†单元格是否原样来自 estimate_metric       | 确定性，复用†单元格台账             |
+| `language_judge`       | 实质密度 / 逻辑连贯 / 学术语气，各 1~5 锚定分 | LLM 判分，失败自动跳过              |
+
+**两道防线**：强度型断言（"显著提升""最优""首次"）未量化会在 `finish_draft` 时**直接拦截**并逐条列出原句；普通比较（"优于""更好"）只警告。全部通过后模型会调用 `evaluate_draft` 生成 `eval.json`：
+
+```json
+{
+  "eval_version": 1,
+  "total": 94.0,
+  "baseline_total": 93.0,
+  "delta": 1.0,
+  "tasks": [
+    {
+      "task": "claim_audit",
+      "score": 100.0,
+      "baseline": 90.0,
+      "delta": 10.0,
+      "detail": { "...": "..." }
+    }
+  ]
+}
+```
+
+**基线回填**：`baseline.yaml` 存放参考跑的分数快照。首次使用建议：先完整生成一篇论文，把 `eval.json` 里各任务的 score 回填到用户 `baseline.yaml`，之后的每次 delta 就是相对你自己基线的量化变化——"这次比上次好多了"从此有数字可查。
+
+## 进阶使用
+
+以下内容按需阅读：分发exe、更换排版规范或添加技能都不需要改动源码。
+
 ### 打包为 exe（可选）
 
 需要分发给没有 Python 环境的 Windows 机器时，用 PyInstaller 打包：
@@ -75,9 +138,77 @@ uv run pyinstaller package.spec --noconfirm
 2. 运行 `drpaper.exe`，进入交互式会话，输入方式同上
 3. 生成结果输出到运行目录下的 `.output/<论文题目>/`
 
-自定义 skills 与自定义排版样式、检索源配置、评估配置一致：打包运行放 **exe 同级目录**（`skills/`、`profiles/`、`sources.yaml`、`eval.yaml`、`baseline.yaml`），源码运行为 `~/.drpaper/` 下对应路径，均无需重新打包。
+### 自定义排版样式
 
-## 项目结构
+排版规范（字体、字号、页边距、行距等）由样式档案（YAML）驱动，内置 + 用户两级目录，同名档案用户目录覆盖内置版：
+
+| 运行方式 | 用户样式目录           |
+| -------- | ---------------------- |
+| 打包 exe | exe 同级的 `profiles/` |
+| 源码运行 | `~/.drpaper/profiles/` |
+
+放入名为 `default.yaml` 的档案即作为默认排版规范；也可以放多个档案（如 `hnu-thesis.yaml`、`ieee.yaml`）按名称选用。
+
+档案格式（与内置 `profiles/thesis-generic.yaml` 一致，建议复制一份改值）：
+
+```yaml
+name: 某大学学位论文 # 档案显示名，缺省取文件名
+
+fonts:
+  cn_body: 宋体 # 中文正文字体
+  cn_heading: 黑体 # 中文标题字体
+  en: Times New Roman # 西文字体
+
+sizes: # 字号：pt 为程序唯一真值，zh 仅作阅读对照
+  title: { zh: 三号, pt: 16 }
+  heading1: { zh: 四号, pt: 14 }
+  body: { zh: 小四, pt: 12 }
+  reference: { zh: 五号, pt: 10.5 }
+
+page:
+  margin_cm: 2.54 # 页边距
+
+paragraph:
+  line_spacing: 1.5 # 行距倍数
+  first_line_indent_chars: 2 # 首行缩进（按正文字号计的字符数）
+```
+
+档案在启动时加载并校验，文件缺失或字段不合法会直接提示，不会等到导出才报错。
+
+### 自定义 skills
+
+在用户技能目录下新建文件夹并放置 `SKILL.md` 即可，无需改动源码、重新打包也不会丢失（与内置技能合并加载，同名时用户版覆盖内置版）：
+
+| 运行方式 | 用户技能目录         |
+| -------- | -------------------- |
+| 打包 exe | exe 同级的 `skills/` |
+| 源码运行 | `~/.drpaper/skills/` |
+
+```
+<用户技能目录>/
+  my-skill/
+    SKILL.md            # 必须，frontmatter 需含 name 与 description
+    references/         # 可选，参考文件，agent 用 load_skill 的 file 参数按需读取
+```
+
+`SKILL.md` 格式（与内置技能一致）：
+
+```markdown
+---
+name: my-skill
+description: 一句话说明何时触发（agent 据此决定是否加载）
+---
+
+具体的方法论与操作步骤正文……
+```
+
+启动后 agent 的系统提示词索引会自动出现该技能，命中时模型通过 `load_skill` 加载完整内容。
+
+自定义排版样式、检索源配置、评估配置与 skills 同款模式：打包运行放 **exe 同级目录**（`profiles/`、`sources.yaml`、`eval.yaml`、`baseline.yaml`），源码运行为 `~/.drpaper/` 下对应路径，均无需重新打包。
+
+## 开发者指南
+
+### 项目结构
 
 按类别分层，依赖方向自上而下：
 
@@ -128,7 +259,7 @@ src/drpaper/
     docx_writer.py       #   docx 导出（字体/缩进/批注）
 ```
 
-## 扩展文献源
+### 扩展文献源
 
 `literature/base.py` 定义了 `SearchProvider` 协议。新增数据源只需两步：
 
@@ -142,118 +273,6 @@ src/drpaper/
 `per_session_calls`（每会话对该源的最大调用次数，即预算分配）。
 API key 建议放 `.env`（`SEMANTIC_SCHOLAR_API_KEY` / `OPENALEX_MAILTO`），优先于 YAML。
 
-## 自定义 skills
+### 评估参数调整
 
-在用户技能目录下新建文件夹并放置 `SKILL.md` 即可，无需改动源码、
-重新打包也不会丢失（与内置技能合并加载，同名时用户版覆盖内置版）：
-
-| 运行方式 | 用户技能目录         |
-| -------- | -------------------- |
-| 打包 exe | exe 同级的 `skills/` |
-| 源码运行 | `~/.drpaper/skills/` |
-
-```
-<用户技能目录>/
-  my-skill/
-    SKILL.md            # 必须，frontmatter 需含 name 与 description
-    references/         # 可选，参考文件，agent 用 load_skill 的 file 参数按需读取
-```
-
-`SKILL.md` 格式（与内置技能一致）：
-
-```markdown
----
-name: my-skill
-description: 一句话说明何时触发（agent 据此决定是否加载）
----
-
-具体的方法论与操作步骤正文……
-```
-
-启动后 agent 的系统提示词索引会自动出现该技能，命中时模型通过 `load_skill` 加载完整内容。
-
-## 自定义排版样式
-
-排版规范（字体、字号、页边距、行距等）由样式档案（YAML）驱动，内置 + 用户两级目录，
-与自定义 skills 同款模式——同名档案用户目录覆盖内置版：
-
-| 运行方式 | 用户样式目录           |
-| -------- | ---------------------- |
-| 打包 exe | exe 同级的 `profiles/` |
-| 源码运行 | `~/.drpaper/profiles/` |
-
-放入名为 `default.yaml` 的档案即作为默认排版规范；也可以放多个档案（如 `hnu-thesis.yaml`、`ieee.yaml`）按名称选用。
-
-档案格式（与内置 `profiles/thesis-generic.yaml` 一致，建议复制一份改值）：
-
-```yaml
-name: 某大学学位论文 # 档案显示名，缺省取文件名
-
-fonts:
-  cn_body: 宋体 # 中文正文字体
-  cn_heading: 黑体 # 中文标题字体
-  en: Times New Roman # 西文字体
-
-sizes: # 字号：pt 为程序唯一真值，zh 仅作阅读对照
-  title: { zh: 三号, pt: 16 }
-  heading1: { zh: 四号, pt: 14 }
-  body: { zh: 小四, pt: 12 }
-  reference: { zh: 五号, pt: 10.5 }
-
-page:
-  margin_cm: 2.54 # 页边距
-
-paragraph:
-  line_spacing: 1.5 # 行距倍数
-  first_line_indent_chars: 2 # 首行缩进（按正文字号计的字符数）
-```
-
-档案在启动时加载并校验，文件缺失或字段不合法会直接提示，不会等到导出才报错。
-
-## 质量评分与基线校准
-
-论文中的比较性表述很难自证"好多少"，本功能用一组**固定标准任务集**把论文质量变成分数：任务 ID 固定不变，评分卡带版本号，任何两次生成的结果都可以横向对比。
-
-**五个标准任务**
-
-| 任务                   | 评什么                                        | 方式                                |
-| ---------------------- | --------------------------------------------- | ----------------------------------- |
-| `claim_audit`          | 比较性断言是否有数字 / †区间 / [n] 引用支撑   | 确定性正则（可选 LLM 复核过滤误报） |
-| `citation_consistency` | 正文引用与文献库一致性                        | 确定性，复用导出前的校验            |
-| `structure_balance`    | 缺节、单节字数比越界、单节占全文比例超限      | 确定性                              |
-| `numeric_discipline`   | 表格†单元格是否原样来自 estimate_metric       | 确定性，复用†单元格台账             |
-| `language_judge`       | 实质密度 / 逻辑连贯 / 学术语气，各 1~5 锚定分 | LLM 判分，失败自动跳过              |
-
-**两道防线**：强度型断言（"显著提升""最优""首次"）未量化会在 `finish_draft` 时**直接拦截**并逐条列出原句；普通比较（"优于""更好"）只警告。全部通过后模型会调用 `evaluate_draft` 生成 `eval.json`：
-
-```json
-{
-  "eval_version": 1,
-  "total": 94.0,
-  "baseline_total": 93.0,
-  "delta": 1.0,
-  "tasks": [
-    {
-      "task": "claim_audit",
-      "score": 100.0,
-      "baseline": 90.0,
-      "delta": 10.0,
-      "detail": { "...": "..." }
-    }
-  ]
-}
-```
-
-**基线回填**：`baseline.yaml`（内置默认 + `~/.drpaper/baseline.yaml` 或 exe 同级覆盖）存放参考跑的分数快照。首次使用建议：先完整生成一篇论文，把 `eval.json` 里各任务的 score 回填到用户 `baseline.yaml`，之后的每次 delta 就是相对你自己基线的量化变化——"这次比上次好多了"从此有数字可查。
-
-**参数调整**：权重与阈值在 `eval.yaml`（内置 + 用户覆盖，同 sources.yaml 模式）——各任务权重 `weights`、断言扣分 `claim_penalty_intensified` / `claim_penalty_plain`、单节占比上限 `max_section_share`、LLM 复核开关 `claim_llm_verify` 与判分开关 `judge_enabled`。
-
-## ⚠️ 数据必须替换与勘误（学术诚信底线）
-
-**表格中黄色高亮的†数值是写作参照，不是实验结果，论文里不允许留下任何一个。**
-
-- †区间是基于文献统计的**预期参考值**，不是你的实验数据。直接把它当作实验结果留在论文中，属于编造数据，是学术造假。完成实验后必须逐个替换为自己的实测值，并同步改写对应分析段——"预期 / 有望"的口径要改成实际结论
-- 预期区间的唯一用途是帮助你在动手实验前判断结果量级是否合理：如果实测远低于区间，先怀疑实验设置有误；如果确实达不到，如实报告并分析原因，这同样是正常且诚实的结果
-- 基线行的文献实测值虽可溯源至原文献，也须核对你复现时的版本、数据划分与评测协议是否一致，不一致时勘误并说明
-- "【待补充】"占位与预期区间一样，都必须在实验后补齐为真实数据
-- 生成的文本仅供学习论文结构与写法，作为正式成果提交前请务必核实所有引用内容
+评分权重与阈值在 `eval.yaml`（内置 + 用户覆盖，同 sources.yaml 模式）：各任务权重 `weights`、断言扣分 `claim_penalty_intensified` / `claim_penalty_plain`、单节占比上限 `max_section_share`、LLM 复核开关 `claim_llm_verify` 与判分开关 `judge_enabled`。基线快照存放在 `baseline.yaml`（内置默认 + `~/.drpaper/baseline.yaml` 或 exe 同级覆盖）。
