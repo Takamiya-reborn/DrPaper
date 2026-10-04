@@ -19,7 +19,8 @@ from drpaper.llm.client import ChatCallbacks, LLMClient
 WELCOME = """\
 === DrPaper —— 中文学术写作 Agent ===
 
-- 论文起草：告诉我研究方向、课题和字数要求，我先在 arXiv 检索真实文献，
+- 论文起草：告诉我研究方向、课题和字数要求，我先在多个学术数据源
+  （arXiv / OpenAlex / Semantic Scholar）检索真实文献，
   再为你生成一份结构规范、格式合规的论文初稿（Word 格式）。
 - 论文修改：把论文或段落交给我，我逐项检查结构、论证与表达，
   按严重程度分级定位问题，逐条给出修改建议；也支持学术润色、课题查新与实验设计。

@@ -1,19 +1,19 @@
 # DrPaper
 
-中文学术写作 Agent。基于 LLM tool-calling，在 arXiv 检索真实文献并生成结构规范、格式合规的中文论文初稿（Word 格式），供初学者模仿修改；同时提供论文诊断、润色、查新、实验设计与研究指导能力。
+中文学术写作 Agent。基于 LLM tool-calling，多源检索真实文献（arXiv / OpenAlex / Semantic Scholar，按权威性分层调度）并生成结构规范、格式合规的中文论文初稿（Word 格式），供初学者模仿修改；同时提供论文诊断、润色、查新、实验设计与研究指导能力。
 
 ## 技术栈
 
 - Python ≥ 3.13，依赖管理与打包使用 [uv](https://docs.astral.sh/uv/)
 - [openai](https://pypi.org/project/openai/) SDK：调用 OpenAI 兼容接口的 LLM，流式输出 + tool-calling 循环
-- [arxiv](https://pypi.org/project/arxiv/)：arXiv 文献检索
+- [arxiv](https://pypi.org/project/arxiv/)：arXiv 文献检索（OpenAlex / Semantic Scholar 走 REST API，标准库实现）
 - [python-docx](https://pypi.org/project/python-docx/)：生成符合学术排版规范的 docx
 
 ## 功能
 
 **论文起草**
 
-- **arXiv 真实检索**：每条参考文献均来自 arXiv API 返回的元数据（标题/作者/编号），正文引用与文献库一一对应，导出前自动校验，杜绝编造文献
+- **多源真实检索**：每条参考文献均来自检索 API 返回的元数据（标题/作者/编号）。arXiv 与 OpenAlex 作为 Tier-1 源先行检索，Semantic Scholar 作为 Tier-2 源仅在结果不足时调用（省配额）；结果跨源去重、按权威度（引用数/载体/年份）排序后截断返回，控制 token 消耗。正文引用与文献库一一对应，导出前自动校验，杜绝编造文献
 - **生成初稿**：按"摘要 → 关键词 → 引言 → 相关工作 → 方法 → 实验设计 → 结论与展望"的标准结构生成，按用户要求控制字数
 - **规范排版 docx**：A4 页面、黑体标题、宋体正文（西文 Times New Roman）、小四字号、1.5 倍行距、首行缩进 2 字符、两端对齐、悬挂缩进参考文献；排版规范由样式档案（YAML）驱动，可自定义（见[自定义排版样式](#自定义排版样式)）
 - **预期数据估计**：写实验对比表前，Agent 先从文献库摘要中抽取真实实测数字（逐字校验，编造的数字无法通过），再做确定性统计估计——基线行是文献实测值（可溯源、标 [n] 引用），"本文方法"行是带†标记的预期区间：锚定最优基线、宽度取自文献间散布、下界刻意压低以对冲文献报告偏乐观的发表偏倚；可比实测值不足 3 条时拒绝估计、回退"【待补充】"占位。导出 Word 中†单元格黄色高亮并附批注，提醒替换为实测值（见[数据必须替换与勘误](#️-数据必须替换与勘误学术诚信底线)）
@@ -74,7 +74,7 @@ uv run pyinstaller package.spec --noconfirm
 2. 运行 `drpaper.exe`，进入交互式会话，输入方式同上
 3. 生成结果输出到运行目录下的 `.output/<论文题目>/`
 
-自定义 skills 照常放在 `~/.drpaper/skills/`；自定义排版样式则放在 **exe 同级的 `profiles/` 目录**（源码运行为 `~/.drpaper/profiles/`），均无需重新打包。
+自定义 skills 与自定义排版样式、检索源配置一致：打包运行放 **exe 同级目录**（`skills/`、`profiles/`、`sources.yaml`），源码运行为 `~/.drpaper/` 下对应路径，均无需重新打包。
 
 ## 项目结构
 
@@ -84,6 +84,7 @@ uv run pyinstaller package.spec --noconfirm
 src/drpaper/
   __init__.py            # main() 入口
   __main__.py            # python -m drpaper
+  runtime.py             # 用户资源目录定位（内置 + 用户两级资源的公共基建）
   app/                   # 【应用层】入口与配置
     cli.py               #   REPL 交互循环
     config.py            #   .env 配置加载
@@ -93,13 +94,23 @@ src/drpaper/
     tools.py             #   LLM 工具注册（检索/估计/导出）
   llm/                   # 【模型层】LLM 客户端封装
     client.py            #   流式对话 + 工具执行循环
-  literature/            # 【文献层】可替换的检索数据源
-    base.py              #   Paper 模型 + SearchProvider 协议（扩展点）
-    arxiv.py             #   arXiv 实现
-    metrics.py           #   指标库：摘要实测数字抽取 + 预期区间估计 + †单元格校验
+  literature/            # 【文献层】可替换的检索数据源与聚合策略
+    base.py              #   Paper 模型 + SearchProvider 协议（扩展点）+ 字段清洗原语
+    sources/             #   各检索源实现
+      arxiv.py           #     arXiv 实现
+      openalex.py        #     OpenAlex 实现
+      semantic_scholar.py#     Semantic Scholar 实现
+      http.py            #     检索源共用 HTTP 客户端（限流退避重试）
+    authority.py         #   权威度评分（引用数/载体/年份）
+    aggregator.py        #   聚合器：分层检索 + 会话预算 + 跨源去重 + 排序
+    sources.yaml         #   内置检索源配置
+    sources_config.py    #   sources.yaml 两级加载（内置 + 用户覆盖）
+    present.py           #   检索结果紧凑呈现（裁剪进对话历史）
   paper/                 # 【论文层】领域数据与规则
     draft.py             #   草稿 + 文献库 + 引用校验
     markdown_parser.py   #   Markdown 子集解析
+    wordcount.py         #   中文字数统计
+    metrics.py           #   指标库：摘要实测数字抽取 + 预期区间估计 + †单元格校验
   skills/                # 【技能层】论文专精 skills，按需加载
     manager.py           #   SkillManager：索引 + 渐进式加载
     builtin/             #   内置技能包（SKILL.md + references/）
@@ -112,18 +123,30 @@ src/drpaper/
 
 ## 扩展文献源
 
-`literature/base.py` 定义了 `SearchProvider` 协议。新增数据源（如 Semantic Scholar）只需：
+`literature/base.py` 定义了 `SearchProvider` 协议。新增数据源只需两步：
 
-1. 在 `literature/` 下新建实现类，返回 `Paper` 列表
-2. 在 `agent/core.py` 中注册即可
+1. 在 `literature/sources/` 下新建实现类，返回 `Paper` 列表，并在 `literature/aggregator.py` 的
+   `_PROVIDER_FACTORIES` 中登记源名与构造方式
+2. 在 `sources.yaml` 的 `sources:` 下加一个条目（或复制到用户配置覆盖：打包运行放
+   exe 同级 `sources.yaml`，源码运行为 `~/.drpaper/sources.yaml`，无需重新打包）
+
+检索源配置项：`enabled`（开关）、`tier`（数字小者优先检索，高层结果足够则不调低层源）、
+`weight`（权威分权重，影响合并排序）、`max_results`（单次向该源请求的条数上限）、
+`per_session_calls`（每会话对该源的最大调用次数，即预算分配）。
+API key 建议放 `.env`（`SEMANTIC_SCHOLAR_API_KEY` / `OPENALEX_MAILTO`），优先于 YAML。
 
 ## 自定义 skills
 
-在用户技能目录 `~/.drpaper/skills/` 下新建文件夹并放置 `SKILL.md` 即可，无需改动源码、
+在用户技能目录下新建文件夹并放置 `SKILL.md` 即可，无需改动源码、
 重新打包也不会丢失（与内置技能合并加载，同名时用户版覆盖内置版）：
 
+| 运行方式 | 用户技能目录         |
+| -------- | -------------------- |
+| 打包 exe | exe 同级的 `skills/` |
+| 源码运行 | `~/.drpaper/skills/` |
+
 ```
-~/.drpaper/skills/
+<用户技能目录>/
   my-skill/
     SKILL.md            # 必须，frontmatter 需含 name 与 description
     references/         # 可选，参考文件，agent 用 load_skill 的 file 参数按需读取

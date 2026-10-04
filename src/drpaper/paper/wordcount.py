@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import re
 
-# 引用标记 [1]、[2,3]：先删除，避免其中的数字被计成词
-_CITATION_PATTERN = re.compile(r"\[\d{1,3}(?:,\s*\d{1,3})*\]")
+from drpaper.paper.markdown_parser import CITATION_PATTERN
 
 # 行首结构符：标题、列表、引用块
 _LEADING_MARKS = re.compile(r"^(?:#{1,6}|[-*+>]|\d+[.、])\s*", re.MULTILINE)
@@ -29,5 +28,5 @@ def count_chars(text: str) -> int:
     """
     text = _LEADING_MARKS.sub("", text)
     text = _INLINE_MARKS.sub("", text)
-    text = _CITATION_PATTERN.sub("", text)
+    text = CITATION_PATTERN.sub("", text)  # 引用标记先删除，避免其中的数字被计成词
     return len(_CJK_PATTERN.findall(text)) + len(_WORD_PATTERN.findall(text))

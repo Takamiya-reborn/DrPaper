@@ -121,12 +121,16 @@ class MetricStore:
                 self._records[record.uid].append(record)
 
     def match(self, dataset: str, metric: str) -> tuple[list[MetricRecord], list[str]]:
-        """按数据集/指标模糊匹配记录；无匹配时返回现有组合供模型纠正叫法。"""
+        """按数据集/指标模糊匹配记录；任一维度为空表示只按另一维度匹配（跨数据集降级用）。
+
+        无匹配时返回现有组合供模型纠正叫法。
+        """
         all_records = [r for records in self._records.values() for r in records]
         matched = [
             r
             for r in all_records
-            if _fuzzy(r.dataset, dataset) and (not metric or _fuzzy(r.metric, metric))
+            if (not dataset or _fuzzy(r.dataset, dataset))
+            and (not metric or _fuzzy(r.metric, metric))
         ]
         combos = sorted({f"{r.dataset} / {r.metric}" for r in all_records})
         return matched, combos
@@ -144,35 +148,48 @@ def _norm_key(text: str) -> str:
 
 # ---- 估计 ----
 
+# 各级证据强度的区间夹宽上限（占最优值比例）：证据越弱区间越宽
+_TIER_WIDTH_CAP = {"exact": 0.05, "sparse": 0.08, "cross_dataset": 0.10}
+_TIER_MIN_N = {"exact": 3, "sparse": 2, "cross_dataset": 3}  # 防御：调用方保证，这里兜底
+
+
 def estimate(
     records: list[MetricRecord],
     dataset: str,
     metric: str,
     higher_is_better: bool = True,
+    *,
+    tier: str = "exact",
 ) -> dict:
-    """从同数据集同指标的实测值做统计估计，产出预期区间与可直接入表的 cell 字符串。
+    """从实测值做统计估计，产出预期区间与可直接入表的 cell 字符串。
 
     规则：锚定最优基线，区间宽度取自文献间散布（四分位距）；
     文献分歧大时加宽（异质性调整）；下界刻意允许低于最优基线，
-    对冲文献报告普遍偏乐观的发表偏倚。实测值不足 3 条拒绝估计。
+    对冲文献报告普遍偏乐观的发表偏倚。实测值少于该级下限拒绝估计。
+
+    tier 标明证据强度：exact=同数据集同指标；sparse=同数据集但仅 2 条；
+    cross_dataset=同指标跨数据集（数据集难度各异，区间无条件按宽分位处理）。
     """
     values = sorted(r.value for r in records)
-    if len(values) < 3:
+    if len(values) < _TIER_MIN_N[tier]:
         return {"status": "insufficient", "n": len(values), "dataset": dataset, "metric": metric}
     median = _quantile(values, 0.5)
     best = values[-1] if higher_is_better else values[0]
-    spread = _quantile(values, 0.75) - _quantile(values, 0.25)
+    if tier == "sparse":
+        spread = values[-1] - values[0]  # 仅 2 条时四分位距低估散布，改用全距
+    else:
+        spread = _quantile(values, 0.75) - _quantile(values, 0.25)
     if spread <= 1e-12:
         spread = max(0.03 * abs(median), 1e-3)
-    heterogeneous = spread > 0.10 * max(abs(median), 1e-9)
+    heterogeneous = tier == "cross_dataset" or spread > 0.10 * max(abs(median), 1e-9)
     low_frac, high_frac = (0.20, 0.60) if heterogeneous else (0.10, 0.40)
     if higher_is_better:
         low, high = best - low_frac * spread, best + high_frac * spread
     else:
         low, high = best - high_frac * spread, best + low_frac * spread
-    # 区间宽度夹在最优值的 0.3%~5%，避免退化为单点或离谱的宽区间
+    # 区间宽度夹在最优值的 0.3%~该级上限，避免退化为单点或离谱的宽区间
     if best:
-        width = min(max(high - low, 0.003 * abs(best)), 0.05 * abs(best))
+        width = min(max(high - low, 0.003 * abs(best)), _TIER_WIDTH_CAP[tier] * abs(best))
         if higher_is_better:
             high = low + width
         else:
@@ -181,20 +198,63 @@ def estimate(
     high_rounded = math.ceil(high * 10) / 10
     if high_rounded - low_rounded < 0.2:
         high_rounded = low_rounded + 0.2
+    if tier == "cross_dataset":
+        head = (
+            f"文献库中 {dataset} 上 {metric} 实测值不足，"
+            f"基于 {len(values)} 条同指标跨数据集文献实测值统计"
+            f"（数据集难度各异，仅供参考），最优 {best}；"
+        )
+    elif tier == "sparse":
+        head = (
+            f"{dataset}/{metric} 可比实测值仅 {len(values)} 条，置信度低，"
+            f"区间已加宽，仅供参考，最优 {best}；"
+        )
+    else:
+        head = f"基于文献库 {len(values)} 条 {dataset}/{metric} 实测值统计，最优 {best}；"
     note = (
-        f"基于文献库 {len(values)} 条 {dataset}/{metric} 实测值统计，最优 {best}；"
-        + ("文献间分歧较大，区间已加宽；" if heterogeneous else "")
+        head
+        + ("文献间分歧较大，区间已加宽；" if heterogeneous and tier != "cross_dataset" else "")
         + "下界刻意允许略低于最优基线——文献报告的提升普遍偏乐观"
     )
     return {
         "status": "ok",
         "dataset": dataset,
         "metric": metric,
+        "tier": tier,
         "n": len(values),
         "best": best,
         "heterogeneous": heterogeneous,
         "cell": f"{low_rounded:.1f}~{high_rounded:.1f}†",
         "note": note,
+        "sources": list(records),
+    }
+
+
+def estimate_graded(
+    exact: list[MetricRecord],
+    cross: list[MetricRecord],
+    dataset: str,
+    metric: str,
+    higher_is_better: bool = True,
+) -> dict:
+    """分级降级估计：精确匹配 ≥3 条 → 同指标跨数据集 ≥3 条 → 精确仅 2 条 → 失败。
+
+    cross 是"只按指标匹配"的全库记录（含 exact）；metric 为空时跨库匹配
+    无意义，由调用方传 []。由于 cross 必为 exact 的超集（同一指标谓词的
+    子串匹配），cross_dataset 级触发时"跨数据集"措辞必然属实。
+    """
+    if len(exact) >= _TIER_MIN_N["exact"]:
+        return estimate(exact, dataset, metric, higher_is_better, tier="exact")
+    if metric and len(cross) >= _TIER_MIN_N["cross_dataset"]:
+        return estimate(cross, dataset, metric, higher_is_better, tier="cross_dataset")
+    if len(exact) >= _TIER_MIN_N["sparse"]:
+        return estimate(exact, dataset, metric, higher_is_better, tier="sparse")
+    return {
+        "status": "insufficient",
+        "n": len(exact),
+        "cross_n": len(cross),
+        "dataset": dataset,
+        "metric": metric,
     }
 
 

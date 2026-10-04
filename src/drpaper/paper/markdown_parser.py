@@ -49,7 +49,9 @@ class TableNode:
 Node = TitleNode | HeadingNode | ParagraphNode | TableNode
 
 _BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
-_CITATION_PATTERN = re.compile(r"\[(\d{1,3}(?:,\s*\d{1,3})*)\]")
+
+# 引用标记（如 [1]、[2, 3]）：全项目引用标记的唯一权威定义
+CITATION_PATTERN = re.compile(r"\[(\d{1,3}(?:,\s*\d{1,3})*)\]")
 
 # 表题行：如"表 1：各方法性能对比"
 _CAPTION_PATTERN = re.compile(r"^表\s*\d*\s*[:：]")
@@ -150,7 +152,7 @@ def parse_runs(text: str) -> list[tuple[str, bool]]:
 def extract_citations(text: str) -> set[int]:
     """提取文本中的引用编号，如 `[1]`、`[2,3]`。"""
     numbers: set[int] = set()
-    for match in _CITATION_PATTERN.finditer(text):
+    for match in CITATION_PATTERN.finditer(text):
         for part in match.group(1).split(","):
             numbers.add(int(part.strip()))
     return numbers

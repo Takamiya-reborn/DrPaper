@@ -6,7 +6,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-USER_SKILLS_DIR = Path.home() / ".drpaper" / "skills"
+from drpaper.runtime import user_resource_path
+
+# 打包运行取 exe 同级 skills/，源码运行取 ~/.drpaper/skills（与 profiles、sources.yaml 一致）
+USER_SKILLS_DIR = user_resource_path("skills")
 
 
 @dataclass

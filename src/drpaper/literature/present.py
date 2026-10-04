@@ -31,4 +31,6 @@ def paper_card(paper: Paper, include_url: bool = False) -> dict:
     }
     if include_url:
         record["url"] = paper.url
+    if paper.citations > 0:
+        record["citations"] = paper.citations  # 权威度信号，供模型取舍
     return record

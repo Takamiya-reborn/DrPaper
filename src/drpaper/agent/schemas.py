@@ -12,8 +12,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "search_arxiv",
-            "description": "在 arXiv 检索真实文献。默认登记入文献库并返回引用编号（起草引用以此为准）；"
+            "name": "search_literature",
+            "description": "在多个学术数据源（arXiv、OpenAlex、Semantic Scholar）检索真实文献，"
+            "已跨源去重并按权威度排序合并。默认登记入文献库并返回引用编号（起草引用以此为准）；"
             "咨询类任务（问方向、荐论文、查新）传 register=false，结果不入库。",
             "parameters": {
                 "type": "object",
@@ -42,7 +43,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "description": "为实验对比表估计指标区间：从文献库摘要抽取真实实测数字做统计估计。"
             "写含性能数字的对比表前必须先调用；返回的 baselines 用于基线行（标 [n] 引用），"
             "cell 字符串原样用作「本文方法」行（含†，禁止改动数字）。"
-            "返回 insufficient 或 no_match 时该单元格改用【待补充：……】。",
+            "证据不足时自动降级——同指标跨数据集参考或低置信区间，返回的 tier 字段标明证据强度"
+            "（exact/cross_dataset/sparse）；仅 insufficient 或 no_match 时该单元格改用【待补充：……】。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -208,5 +210,5 @@ HINT_CITATION = "请修正正文引用；未引用的文献可用 remove_papers 
 HINT_EXPECTED_VALUE = (
     "表格中标†的数值必须原样使用 estimate_metric 返回的 cell 字符串（含区间与†），"
     "禁止改动数字；尚未估计的先调用 estimate_metric，"
-    "返回 insufficient 或 no_match 时改用【待补充：……】。"
+    "返回 insufficient 或 no_match（降级估计也无法给出）时改用【待补充：……】。"
 )

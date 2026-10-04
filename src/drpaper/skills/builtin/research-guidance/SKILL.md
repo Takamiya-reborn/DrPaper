@@ -1,6 +1,6 @@
 ---
 name: research-guidance
-description: 问研究方向、求推荐论文、找可接续工作时加载——基于 arXiv 的选题与接续建议流程
+description: 问研究方向、求推荐论文、找可接续工作时加载——基于多源文献检索的选题与接续建议流程
 ---
 
 # 研究指导：问方向、荐论文、找接续点
@@ -13,7 +13,7 @@ description: 问研究方向、求推荐论文、找可接续工作时加载—�
 
 ## 第二步：咨询检索（不入文献库）
 
-一律调用 search_arxiv 且 **传 register=false**（咨询结果不登记、无编号，避免污染起草文献库）。至少 3 组查询：
+一律调用 search_literature 且 **传 register=false**（咨询结果不登记、无编号，避免污染起草文献库）。至少 3 组查询：
 
 1. 领域大词 + 近两年热词（如 "LLM agent memory 2024"）
 2. 候选方法名 / 技术词（如 "retrieval augmented generation evaluation"）
@@ -59,4 +59,4 @@ description: 问研究方向、求推荐论文、找可接续工作时加载—�
 - 推荐与趋势判断必须基于本次检索结果，检索不到就明说覆盖不足，禁止凭记忆推荐
 - 咨询结论引用论文一律〈标题〉+年份+链接，不用 [n] 编号（编号仅属于文献库）
 - 用户决定动笔后，转 paper-drafting 流程，并用 register=true 重新检索把选定方向的关键文献登记入库
-- arXiv 只覆盖预印本：结尾提示建议再人工核查 Google Scholar / DBLP，尤其对非 CS 领域
+- 检索源覆盖有限（预印本与主要期刊会议为主）：结尾提示建议再人工核查 Google Scholar / DBLP，尤其对非 CS 领域

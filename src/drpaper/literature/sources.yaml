@@ -1,0 +1,27 @@
+# 检索源配置：tier 数字小者优先检索；同 tier 内按 weight 降序。
+# 复制本文件到 ~/.drpaper/sources.yaml（打包运行放 exe 同级）可覆盖单个条目，
+# API key 建议放 .env（SEMANTIC_SCHOLAR_API_KEY / OPENALEX_MAILTO），优先于本文件。
+policy:
+  max_total: 10             # 合并去重后返回给模型的最大条数（控制 token）
+  min_authority_score: 0.0  # Tier-1 结果最高权威分低于该值也触发降级（0 = 关闭）
+sources:
+  arxiv:
+    enabled: true
+    tier: 1
+    weight: 1.0
+    max_results: 10         # 单次调用向该源请求的条数上限
+    per_session_calls: 3    # 每会话对该源的最大调用次数（预算分配）
+  openalex:
+    enabled: true
+    tier: 1
+    weight: 1.0
+    max_results: 10
+    per_session_calls: 3
+    mailto: ""              # OpenAlex 礼貌池邮箱（等价于 api_key 键）；也可用 .env 的 OPENALEX_MAILTO
+  semantic_scholar:
+    enabled: true
+    tier: 2
+    weight: 0.8
+    max_results: 10
+    per_session_calls: 2
+    api_key: ""             # 建议放 .env 的 SEMANTIC_SCHOLAR_API_KEY，此处留空

@@ -9,7 +9,7 @@ from drpaper.agent.prompts import build_system_prompt
 from drpaper.agent.schemas import TOOL_SCHEMAS
 from drpaper.agent.tools import ToolBox
 from drpaper.export.style_profile import StyleProfile
-from drpaper.literature.arxiv import ArxivProvider
+from drpaper.literature.aggregator import default_aggregator
 from drpaper.llm.client import ChatCallbacks, LLMClient
 from drpaper.paper.draft import Draft
 from drpaper.skills.manager import SkillManager
@@ -36,7 +36,7 @@ class PaperAgent:
         self._skill_index = skills.index_prompt()
         # messages 传引用给 ToolBox（折叠旧稿用），后续只 append 不重新绑定
         self._toolbox = ToolBox(
-            provider=ArxivProvider(),
+            provider=default_aggregator(),
             llm=self.llm,
             draft=Draft(),
             output_dir=self.output_dir,

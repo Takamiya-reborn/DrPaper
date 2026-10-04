@@ -25,11 +25,11 @@ from drpaper.export.docx_writer import export_docx
 from drpaper.export.naming import sanitize_filename
 from drpaper.export.style_profile import StyleProfile
 from drpaper.literature.base import SearchProvider
-from drpaper.literature.metrics import MetricStore, estimate, expected_cell_errors
 from drpaper.literature.present import paper_card
 from drpaper.llm.client import LLMClient
 from drpaper.paper.draft import Draft, parse_outline
 from drpaper.paper.markdown_parser import TableNode, extract_citations, parse
+from drpaper.paper.metrics import MetricStore, estimate_graded, expected_cell_errors
 from drpaper.paper.wordcount import count_chars
 from drpaper.skills.manager import SkillManager
 
@@ -61,7 +61,7 @@ class ToolBox:
     def handlers(self) -> dict[str, Any]:
         """工具名 → 处理函数，供 LLM 循环执行。"""
         return {
-            "search_arxiv": self._search_arxiv,
+            "search_literature": self._search_literature,
             "estimate_metric": self._estimate_metric,
             "begin_draft": self._begin_draft,
             "submit_section": self._submit_section,
@@ -73,7 +73,7 @@ class ToolBox:
 
     # ---- 文献检索 ----
 
-    def _search_arxiv(self, args: dict[str, Any]) -> str:
+    def _search_literature(self, args: dict[str, Any]) -> str:
         query = str(args.get("query", "")).strip()
         if not query:
             return _error("query 不能为空")
@@ -110,21 +110,32 @@ class ToolBox:
             return _error("dataset 不能为空")
         self.metrics.ensure_extracted(self.llm, self.draft.references)
         matched, available = self.metrics.match(dataset, metric)
-        if not matched:
+        # 降级用：同指标跨数据集的记录（metric 为空时跨库匹配无意义，传空跳过该级）
+        cross = self.metrics.match("", metric)[0] if metric else []
+        if not matched and not cross:
             return _result(
                 status="no_match",
                 available=available,
-                hint="文献库中没有该数据集/指标的可比实测值；该单元格用【待补充：……】占位，可先检索相关文献再重试",
+                hint="文献库中没有该指标/数据集的任何可比实测值；该单元格用【待补充：……】占位，或先检索相关文献再重试",
             )
-        result = estimate(matched, dataset, metric, higher_is_better=higher)
+        result = estimate_graded(
+            matched, cross, dataset, metric, higher_is_better=higher
+        )
         if result["status"] != "ok":
             return _result(
                 **result,
-                hint=f"可比实测值仅 {result['n']} 条（不足 3），无法给出可靠区间；该单元格用【待补充：……】占位",
+                hint=f"可比实测值不足（本数据集 {result['n']} 条，同指标跨数据集 {result['cross_n']} 条），"
+                "降级估计仍无法给出可靠区间；该单元格用【待补充：……】占位，可先检索相关文献再重试",
             )
         index = {p.uid: i for i, p in enumerate(self.draft.references, start=1)}
         result["baselines"] = [
-            {"ref": index[r.uid], "method": r.method, "value": r.value} for r in matched
+            {
+                "ref": index[r.uid],
+                "dataset": r.dataset,
+                "method": r.method,
+                "value": r.value,
+            }
+            for r in result.pop("sources")
         ]
         self._issued_cells.append(result["cell"])
         return _result(**result)

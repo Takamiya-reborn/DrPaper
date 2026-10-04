@@ -8,11 +8,12 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+from drpaper.runtime import user_resource_path
 
 BUILTIN_PROFILES_DIR = Path(__file__).parent / "profiles"
 BUILTIN_PROFILE_STEM = "thesis-generic"
@@ -38,9 +39,7 @@ class StyleProfile:
 
 def user_profiles_dir() -> Path:
     """用户样式档案目录：打包运行取 exe 同级 profiles/，源码运行取 ~/.drpaper/profiles。"""
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent / "profiles"
-    return Path.home() / ".drpaper" / "profiles"
+    return user_resource_path("profiles")
 
 
 def list_profiles() -> dict[str, Path]:

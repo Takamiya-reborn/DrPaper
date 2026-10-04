@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import arxiv
 
-from drpaper.literature.base import Paper
+from drpaper.literature.base import Paper, normalize_ws
 
 
 class ArxivProvider:
@@ -26,10 +26,10 @@ class ArxivProvider:
             papers.append(
                 Paper(
                     uid=result.get_short_id(),
-                    title=" ".join(result.title.split()),
+                    title=normalize_ws(result.title),
                     authors=[a.name for a in result.authors],
                     year=published.year if published else 0,
-                    abstract=" ".join(result.summary.split()),
+                    abstract=normalize_ws(result.summary),
                     url=result.pdf_url or str(result.entry_id),
                     tags=[c for c in result.categories[:3]],
                 )
