@@ -1,32 +1,8 @@
-"""学术 docx 格式规范常量（对齐常见期刊/学位论文要求）。"""
+"""写作指导批注（面向初学者，按节标题关键词匹配，导出时附加到 docx 批注）。"""
 
 from __future__ import annotations
 
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
-from docx.shared import Cm, Pt
-
-# 字体
-CN_BODY_FONT = "宋体"
-CN_HEADING_FONT = "黑体"
-EN_FONT = "Times New Roman"
-
-# 字号（中文字号制）
-SIZE_TITLE = Pt(16)  # 三号：题目
-SIZE_HEADING_1 = Pt(14)  # 四号：一级节标题
-SIZE_BODY = Pt(12)  # 小四：正文/节标题/摘要
-SIZE_REFERENCE = Pt(10.5)  # 五号：参考文献
-
-# 页面
-PAGE_MARGINS = Cm(2.54)
-
-# 段落
-LINE_SPACING = WD_LINE_SPACING.ONE_POINT_FIVE
-FIRST_LINE_INDENT_CHARS = 2
-
-ALIGN_JUSTIFY = WD_ALIGN_PARAGRAPH.JUSTIFY
-ALIGN_CENTER = WD_ALIGN_PARAGRAPH.CENTER
-
-# 写作指导批注（面向初学者，按节标题关键词匹配）
+# 写作指导批注（按节标题关键词匹配）
 SECTION_GUIDES: list[tuple[str, str]] = [
     (
         "引言",

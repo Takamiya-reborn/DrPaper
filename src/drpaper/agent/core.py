@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from drpaper.agent.prompts import build_system_prompt
 from drpaper.agent.tools import TOOL_SCHEMAS, ToolBox
+from drpaper.export.style_profile import StyleProfile
 from drpaper.literature.arxiv import ArxivProvider
 from drpaper.llm.client import ChatCallbacks, LLMClient
 from drpaper.paper.draft import Draft
@@ -22,6 +23,7 @@ class PaperAgent:
 
     llm: LLMClient
     output_dir: str
+    style: StyleProfile
     target_chars: int = 5000
     messages: list[dict] = field(default_factory=list)
 
@@ -33,6 +35,7 @@ class PaperAgent:
             provider=ArxivProvider(),
             draft=Draft(),
             output_dir=self.output_dir,
+            style=self.style,
             skills=skills,
             messages=self.messages,
             target_chars=self.target_chars,

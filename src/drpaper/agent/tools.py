@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from drpaper.export.docx_writer import export_docx
+from drpaper.export.style_profile import StyleProfile
 from drpaper.literature.base import SearchProvider
 from drpaper.paper.draft import Draft, Section
 from drpaper.paper.markdown_parser import extract_citations, parse
@@ -198,6 +199,7 @@ class ToolBox:
     provider: SearchProvider
     draft: Draft
     output_dir: str
+    style: StyleProfile
     skills: SkillManager
     messages: list[dict[str, Any]] = field(default_factory=list)
     target_chars: int = 5000
@@ -425,7 +427,7 @@ class ToolBox:
         out_dir = Path(self.output_dir) / name
         nodes = parse(self.draft.markdown)
         docx_path = out_dir / f"{name}.docx"
-        export_docx(nodes, self.draft.references, docx_path)
+        export_docx(nodes, self.draft.references, docx_path, profile=self.style)
         saved = self.draft.save(out_dir)
         return json.dumps(
             {

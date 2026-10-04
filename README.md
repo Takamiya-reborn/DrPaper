@@ -15,7 +15,7 @@
 
 - **arXiv 真实检索**：每条参考文献均来自 arXiv API 返回的元数据（标题/作者/编号），正文引用与文献库一一对应，导出前自动校验，杜绝编造文献
 - **生成初稿**：按"摘要 → 关键词 → 引言 → 相关工作 → 方法 → 实验设计 → 结论与展望"的标准结构生成，按用户要求控制字数
-- **规范排版 docx**：A4 页面、黑体标题、宋体正文（西文 Times New Roman）、小四字号、1.5 倍行距、首行缩进 2 字符、两端对齐、悬挂缩进参考文献
+- **规范排版 docx**：A4 页面、黑体标题、宋体正文（西文 Times New Roman）、小四字号、1.5 倍行距、首行缩进 2 字符、两端对齐、悬挂缩进参考文献；排版规范由样式档案（YAML）驱动，可自定义（见[自定义排版样式](#自定义排版样式)）
 - **写作指导批注**：在各节标题处附带 Word 批注，讲解该节的写作要点
 
 **论文修改**
@@ -73,7 +73,7 @@ uv run pyinstaller package.spec --noconfirm
 2. 运行 `drpaper.exe`，进入交互式会话，输入方式同上
 3. 生成结果输出到运行目录下的 `.output/<论文题目>/`
 
-自定义 skills 照常放在 `~/.drpaper/skills/`，无需重新打包。
+自定义 skills 照常放在 `~/.drpaper/skills/`；自定义排版样式则放在 **exe 同级的 `profiles/` 目录**（源码运行为 `~/.drpaper/profiles/`），均无需重新打包。
 
 ## 项目结构
 
@@ -102,7 +102,9 @@ src/drpaper/
     manager.py           #   SkillManager：索引 + 渐进式加载
     builtin/             #   内置技能包（SKILL.md + references/）
   export/                # 【导出层】交付格式渲染
-    styles.py            #   学术格式规范常量
+    style_profile.py     #   样式档案：内置+用户两级目录的排版规范加载
+    profiles/            #   内置排版样式档案（YAML）
+    guides.py            #   写作指导批注（按节标题关键词匹配）
     docx_writer.py       #   docx 导出（字体/缩进/批注）
 ```
 
@@ -137,6 +139,44 @@ description: 一句话说明何时触发（agent 据此决定是否加载）
 ```
 
 启动后 agent 的系统提示词索引会自动出现该技能，命中时模型通过 `load_skill` 加载完整内容。
+
+## 自定义排版样式
+
+排版规范（字体、字号、页边距、行距等）由样式档案（YAML）驱动，内置 + 用户两级目录，
+与自定义 skills 同款模式——同名档案用户目录覆盖内置版：
+
+| 运行方式 | 用户样式目录           |
+| -------- | ---------------------- |
+| 打包 exe | exe 同级的 `profiles/` |
+| 源码运行 | `~/.drpaper/profiles/` |
+
+放入名为 `default.yaml` 的档案即作为默认排版规范；也可以放多个档案（如 `hnu-thesis.yaml`、`ieee.yaml`）按名称选用。
+
+档案格式（与内置 `profiles/thesis-generic.yaml` 一致，建议复制一份改值）：
+
+```yaml
+name: 某大学学位论文 # 档案显示名，缺省取文件名
+
+fonts:
+  cn_body: 宋体 # 中文正文字体
+  cn_heading: 黑体 # 中文标题字体
+  en: Times New Roman # 西文字体
+
+sizes: # 字号：pt 为程序唯一真值，zh 仅作阅读对照
+  title: { zh: 三号, pt: 16 }
+  heading1: { zh: 四号, pt: 14 }
+  body: { zh: 小四, pt: 12 }
+  reference: { zh: 五号, pt: 10.5 }
+
+page:
+  margin_cm: 2.54 # 页边距
+
+paragraph:
+  line_spacing: 1.5 # 行距倍数
+  first_line_indent_chars: 2 # 首行缩进（按正文字号计的字符数）
+```
+
+档案在启动时加载并校验，文件缺失或字段不合法会直接提示，不会等到导出才报错。
 
 ## 注意事项
 

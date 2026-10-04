@@ -1,0 +1,21 @@
+# 通用学位论文排版规范（对齐常见期刊/学位论文要求）
+# 字号同时标注中文字号名与 pt 值：pt 供程序使用，中文字号仅供阅读对照
+name: 通用学位论文
+
+fonts:
+  cn_body: 宋体
+  cn_heading: 黑体
+  en: Times New Roman
+
+sizes:
+  title: { zh: 三号, pt: 16 }      # 题目
+  heading1: { zh: 四号, pt: 14 }   # 一级节标题
+  body: { zh: 小四, pt: 12 }       # 正文/二级节标题/摘要
+  reference: { zh: 五号, pt: 10.5 } # 参考文献
+
+page:
+  margin_cm: 2.54
+
+paragraph:
+  line_spacing: 1.5                # 行距倍数，1.5 倍
+  first_line_indent_chars: 2       # 首行缩进（按正文字号计的字符数）

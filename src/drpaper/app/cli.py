@@ -7,9 +7,13 @@ import os
 import random
 import sys
 import threading
+import time
+from collections.abc import Callable
 
 from drpaper.agent.core import PaperAgent
 from drpaper.app.config import load_config
+from drpaper.app.phrases import WORKING_PHRASES
+from drpaper.export.style_profile import load_profile
 from drpaper.llm.client import ChatCallbacks, LLMClient
 
 WELCOME = """\
@@ -29,41 +33,24 @@ WELCOME = """\
 输入 exit 或按 Ctrl+C 退出。
 """
 
-# 工具执行的固定趣味短语（CLI 端渲染，零 API token）：(进行中, 完成时)
-_TOOL_PHRASES: dict[str, list[tuple[str, str]]] = {
-    "search_arxiv": [("正在挖钻石 ⛏", "挖到了钻石"), ("正在下矿探险", "满载而归")],
-    "load_skill": [("正在翻阅卷轴 📜", "卷轴已读完")],
-    "begin_draft": [("正在绘制地图 🗺", "地图绘制完成")],
-    "submit_section": [
-        ("正在生成叶绿 🌿", "叶绿生成完毕"),
-        ("正在浇筑混凝土", "浇筑成型"),
-        ("正在铺设轨道", "轨道铺设完毕"),
-    ],
-    "finish_draft": [("正在合成工作台", "工作台已合成")],
-    "export_docx": [("正在点燃熔炉 🔥", "出炉了")],
-    "remove_papers": [("正在清理背包", "背包整理完毕")],
-}
-
-# 模型思考期间（请求已发出、还没有任何输出）的固定短语
-_THINK_PHRASES = ["思考中", "脑内风暴中", "翻阅记忆中"]
-
 
 class StatusLine:
     """终端状态行：旋转符 + 文案，\\r 覆写，与流式正文输出互斥。"""
 
     _FRAMES = itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
-    _INTERVAL = 0.1
+    _FRAME_INTERVAL = 0.1
+    _PHRASE_INTERVAL = 2.0
 
-    def __init__(self) -> None:
+    def __init__(self, phrases: list[str], counter: Callable[[], int]) -> None:
+        self._phrases = phrases
+        self._counter = counter
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._text = ""
 
-    def show(self, text: str) -> None:
-        """显示/更新旋转状态行（已有线程在跑则只换文案）。"""
+    def show(self) -> None:
+        """显示旋转状态行，文案每 2 秒随机轮换（已有线程在跑则继续）。"""
         with self._lock:
-            self._text = text
             if self._thread is None or not self._thread.is_alive():
                 self._stop.clear()
                 self._thread = threading.Thread(target=self._spin, daemon=True)
@@ -75,12 +62,6 @@ class StatusLine:
         with self._lock:
             _write(sys.stdout, "\r\x1b[K")
 
-    def finish(self, text: str) -> None:
-        """停止旋转，原地覆写为完成文案并换行（保留进度痕迹）。"""
-        self._halt()
-        with self._lock:
-            _write(sys.stdout, f"\r\x1b[K✓ {text}\n")
-
     def _halt(self) -> None:
         with self._lock:
             self._stop.set()
@@ -89,9 +70,16 @@ class StatusLine:
             thread.join(0.3)
 
     def _spin(self) -> None:
-        while not self._stop.wait(self._INTERVAL):
+        phrase = random.choice(self._phrases)
+        next_swap = time.monotonic() + self._PHRASE_INTERVAL
+        while not self._stop.wait(self._FRAME_INTERVAL):
+            if time.monotonic() >= next_swap:
+                phrase = random.choice(self._phrases)
+                next_swap = time.monotonic() + self._PHRASE_INTERVAL
+            tokens = self._counter()
+            suffix = f"（已耗 {tokens:,} tokens）" if tokens else ""
             with self._lock:
-                _write(sys.stdout, f"\r{next(self._FRAMES)} {self._text}\x1b[K")
+                _write(sys.stdout, f"\r{next(self._FRAMES)} {phrase}{suffix}\x1b[K")
 
 
 def _write(stream: object, text: str) -> None:
@@ -117,6 +105,7 @@ def main() -> None:
     _use_utf8_stdio()
     os.system("")  # 启用 Windows 终端的 ANSI 转义
     config = load_config()
+    profile = load_profile()
     agent = PaperAgent(
         llm=LLMClient(
             api_key=config.api_key,
@@ -124,29 +113,26 @@ def main() -> None:
             model=config.model,
         ),
         output_dir=config.output_dir,
+        style=profile,
     )
-    status = StatusLine()
     # 会话累计 token：输入 / 输出
     usage_total = {"prompt": 0, "completion": 0}
-    # 当前工具进行中的短语（完成时配对使用）
-    active_phrase: list[str] = []
+    # 状态行实时计数器：已结算轮次 + 当前轮实时用量
+    status = StatusLine(
+        WORKING_PHRASES,
+        counter=lambda: (
+            usage_total["prompt"]
+            + round_usage["prompt"]
+            + usage_total["completion"]
+            + round_usage["completion"]
+        ),
+    )
 
-    def on_tool_start(name: str, _args: dict) -> None:
-        phrases = _TOOL_PHRASES.get(name)
-        if phrases:
-            active_phrase.clear()
-            active_phrase.append(random.choice(phrases)[0])
-            status.show(active_phrase[0])
-
-    def on_tool_end(name: str, elapsed: float) -> None:
-        phrases = _TOOL_PHRASES.get(name)
-        if not phrases:
-            return
-        # 优先复用开始时选中的短语去掉"正在"作完成文案
-        text = active_phrase[0].removeprefix("正在") if active_phrase else phrases[0][1]
-        status.finish(f"{text}完毕 ({elapsed:.1f}s)")
+    def on_tool_start(_name: str, _args: dict) -> None:
+        status.show()
 
     print(WELCOME)
+    print(f"当前排版规范：{profile.name}\n")
     turn = 0
     while True:
         try:
@@ -163,17 +149,17 @@ def main() -> None:
         turn += 1
         round_usage = {"prompt": 0, "completion": 0}
 
-        def on_usage(prompt: int, completion: int, _total: int,
-                     _u: dict = round_usage) -> None:
+        def on_usage(
+            prompt: int, completion: int, _total: int, _u: dict = round_usage
+        ) -> None:
             _u["prompt"] += prompt
             _u["completion"] += completion
 
         callbacks = ChatCallbacks(
             on_text=_print_stream,
             on_first_token=status.clear,
-            on_round_start=lambda: status.show(random.choice(_THINK_PHRASES)),
+            on_round_start=status.show,
             on_tool_start=on_tool_start,
-            on_tool_end=on_tool_end,
             on_usage=on_usage,
         )
 
@@ -181,7 +167,9 @@ def main() -> None:
         try:
             agent.chat(user_input, callbacks=callbacks)
             if turn == 1 and not agent.last_target_detected:
-                print("（未检测到目标字数，默认按 5000 字撰写，可随时说「改成 8000 字」调整。）")
+                print(
+                    "（未检测到目标字数，默认按 5000 字撰写，可随时说「改成 8000 字」调整。）"
+                )
         except KeyboardInterrupt:
             print("\n[已中断本轮，可继续输入]", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - 单轮异常不终止会话
