@@ -6,7 +6,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_COLOR_INDEX
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from docx.table import Table as DocxTable
@@ -108,13 +108,17 @@ def _add_paragraph(document: Document, runs: list[tuple[str, bool]], profile: St
 
 
 def _add_table(document: Document, node: TableNode, profile: StyleProfile) -> None:
-    """渲染学术三线表：表题居中加粗，顶线/底线 1.5pt，表头下线 0.75pt，无竖线。"""
+    """渲染学术三线表：表题居中加粗，顶线/底线 1.5pt，表头下线 0.75pt，无竖线。
+
+    含†的预期值单元格加黄色高亮，并在表题上批注提醒学生替换为实测值。
+    """
+    caption_paragraph = None
     if node.caption:
-        caption = document.add_paragraph()
-        caption.alignment = ALIGN_CENTER
-        caption.paragraph_format.line_spacing = profile.line_spacing
+        caption_paragraph = document.add_paragraph()
+        caption_paragraph.alignment = ALIGN_CENTER
+        caption_paragraph.paragraph_format.line_spacing = profile.line_spacing
         _set_fonts(
-            caption.add_run(node.caption),
+            caption_paragraph.add_run(node.caption),
             profile,
             profile.cn_body_font,
             profile.table_pt,
@@ -128,7 +132,13 @@ def _add_table(document: Document, node: TableNode, profile: StyleProfile) -> No
     for row, cells in enumerate(node.rows, start=1):
         for col, text in enumerate(cells):
             if col < len(node.header):
-                _set_cell(table.cell(row, col), text, profile)
+                _set_cell(table.cell(row, col), text, profile, highlight="†" in text)
+    if caption_paragraph and any("†" in c for row in node.rows for c in row):
+        _attach_comment(
+            document,
+            caption_paragraph,
+            "标†的数值为基于文献库统计的预期参考区间，实验完成后请替换为实测值。",
+        )
 
 
 def _set_table_borders(table: DocxTable) -> None:
@@ -159,12 +169,17 @@ def _set_table_borders(table: DocxTable) -> None:
         tc_pr.append(tc_borders)
 
 
-def _set_cell(cell, text: str, profile: StyleProfile, bold: bool = False) -> None:
-    """填充单元格：水平居中、表格字号、统一中英文字体。"""
+def _set_cell(
+    cell, text: str, profile: StyleProfile, bold: bool = False, highlight: bool = False
+) -> None:
+    """填充单元格：水平居中、表格字号、统一中英文字体；highlight 标记预期值。"""
     paragraph = cell.paragraphs[0]
     paragraph.alignment = ALIGN_CENTER
     paragraph.paragraph_format.line_spacing = 1.0
-    _set_fonts(paragraph.add_run(text), profile, profile.cn_body_font, profile.table_pt, bold=bold)
+    run = paragraph.add_run(text)
+    _set_fonts(run, profile, profile.cn_body_font, profile.table_pt, bold=bold)
+    if highlight:
+        run.font.highlight_color = WD_COLOR_INDEX.YELLOW
 
 
 def _add_references(document: Document, references: list[Paper], profile: StyleProfile) -> None:

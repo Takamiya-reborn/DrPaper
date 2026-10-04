@@ -37,6 +37,7 @@ class PaperAgent:
         # messages 传引用给 ToolBox（折叠旧稿用），后续只 append 不重新绑定
         self._toolbox = ToolBox(
             provider=ArxivProvider(),
+            llm=self.llm,
             draft=Draft(),
             output_dir=self.output_dir,
             style=self.style,

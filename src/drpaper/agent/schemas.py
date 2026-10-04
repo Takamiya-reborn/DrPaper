@@ -38,6 +38,34 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "estimate_metric",
+            "description": "为实验对比表估计指标区间：从文献库摘要抽取真实实测数字做统计估计。"
+            "写含性能数字的对比表前必须先调用；返回的 baselines 用于基线行（标 [n] 引用），"
+            "cell 字符串原样用作「本文方法」行（含†，禁止改动数字）。"
+            "返回 insufficient 或 no_match 时该单元格改用【待补充：……】。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dataset": {
+                        "type": "string",
+                        "description": "数据集名，与文献中的叫法一致，如 'SST-2'",
+                    },
+                    "metric": {
+                        "type": "string",
+                        "description": "指标名，如 'Accuracy'、'F1'；留空匹配任意指标",
+                    },
+                    "higher_is_better": {
+                        "type": "boolean",
+                        "description": "指标是否越大越好，默认 true（误差类指标传 false）",
+                    },
+                },
+                "required": ["dataset", "metric"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "begin_draft",
             "description": "开始起草论文：提交题目、大纲与各节字数预算。各节预算之和应等于目标字数。"
             "之后逐节 submit_section，全部完成后 finish_draft。",
@@ -175,3 +203,10 @@ HINT_TOTAL_SHORT = (
 
 # 正文引用与文献库不一致
 HINT_CITATION = "请修正正文引用；未引用的文献可用 remove_papers 移除"
+
+# 表格中标†的预期值与估计结果不一致
+HINT_EXPECTED_VALUE = (
+    "表格中标†的数值必须原样使用 estimate_metric 返回的 cell 字符串（含区间与†），"
+    "禁止改动数字；尚未估计的先调用 estimate_metric，"
+    "返回 insufficient 或 no_match 时改用【待补充：……】。"
+)

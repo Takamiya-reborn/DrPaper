@@ -15,6 +15,7 @@ from typing import Any
 from drpaper.agent.history import fold_old_section_drafts
 from drpaper.agent.schemas import (
     HINT_CITATION,
+    HINT_EXPECTED_VALUE,
     HINT_INCOMPLETE,
     HINT_TOO_LONG,
     HINT_TOO_SHORT,
@@ -24,9 +25,11 @@ from drpaper.export.docx_writer import export_docx
 from drpaper.export.naming import sanitize_filename
 from drpaper.export.style_profile import StyleProfile
 from drpaper.literature.base import SearchProvider
+from drpaper.literature.metrics import MetricStore, estimate, expected_cell_errors
 from drpaper.literature.present import paper_card
+from drpaper.llm.client import LLMClient
 from drpaper.paper.draft import Draft, parse_outline
-from drpaper.paper.markdown_parser import extract_citations, parse
+from drpaper.paper.markdown_parser import TableNode, extract_citations, parse
 from drpaper.paper.wordcount import count_chars
 from drpaper.skills.manager import SkillManager
 
@@ -45,17 +48,21 @@ class ToolBox:
     """持有会话状态（草稿、检索源、输出目录、消息历史）的工具集合。"""
 
     provider: SearchProvider
+    llm: LLMClient
     draft: Draft
     output_dir: str
     style: StyleProfile
     skills: SkillManager
     messages: list[dict[str, Any]] = field(default_factory=list)
     target_chars: int = 5000
+    metrics: MetricStore = field(default_factory=MetricStore)
+    _issued_cells: list[str] = field(default_factory=list)
 
     def handlers(self) -> dict[str, Any]:
         """工具名 → 处理函数，供 LLM 循环执行。"""
         return {
             "search_arxiv": self._search_arxiv,
+            "estimate_metric": self._estimate_metric,
             "begin_draft": self._begin_draft,
             "submit_section": self._submit_section,
             "finish_draft": self._finish_draft,
@@ -93,7 +100,34 @@ class ToolBox:
             results.append(record)
         return _result(query=query, results=results)
 
-    # ---- 起草 ----
+    # ---- 指标估计 ----
+
+    def _estimate_metric(self, args: dict[str, Any]) -> str:
+        dataset = str(args.get("dataset", "")).strip()
+        metric = str(args.get("metric", "")).strip()
+        higher = args.get("higher_is_better", True) is not False
+        if not dataset:
+            return _error("dataset 不能为空")
+        self.metrics.ensure_extracted(self.llm, self.draft.references)
+        matched, available = self.metrics.match(dataset, metric)
+        if not matched:
+            return _result(
+                status="no_match",
+                available=available,
+                hint="文献库中没有该数据集/指标的可比实测值；该单元格用【待补充：……】占位，可先检索相关文献再重试",
+            )
+        result = estimate(matched, dataset, metric, higher_is_better=higher)
+        if result["status"] != "ok":
+            return _result(
+                **result,
+                hint=f"可比实测值仅 {result['n']} 条（不足 3），无法给出可靠区间；该单元格用【待补充：……】占位",
+            )
+        index = {p.uid: i for i, p in enumerate(self.draft.references, start=1)}
+        result["baselines"] = [
+            {"ref": index[r.uid], "method": r.method, "value": r.value} for r in matched
+        ]
+        self._issued_cells.append(result["cell"])
+        return _result(**result)
 
     def _begin_draft(self, args: dict[str, Any]) -> str:
         title = str(args.get("title", "")).strip()
@@ -197,7 +231,23 @@ class ToolBox:
         errors = self.draft.citation_errors()
         if errors:
             return _result(status="citation_error", errors=errors, hint=HINT_CITATION)
+        errors = self._expected_value_errors()
+        if errors:
+            return _result(
+                status="expected_value_error", errors=errors, hint=HINT_EXPECTED_VALUE
+            )
         return _result(status="ok", total_chars=total, sections=self._sections_detail())
+
+    def _expected_value_errors(self) -> list[str]:
+        """校验全文表格中的†单元格都原样来自 estimate_metric 的返回。"""
+        cells = [
+            cell
+            for node in parse(self.draft.markdown)
+            if isinstance(node, TableNode)
+            for row in node.rows
+            for cell in row
+        ]
+        return expected_cell_errors(cells, self._issued_cells)
 
     def _remove_papers(self, args: dict[str, Any]) -> str:
         raw = args.get("indices", [])
