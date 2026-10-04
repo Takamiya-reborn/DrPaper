@@ -1,0 +1,15 @@
+# 评估配置：复制到 ~/.drpaper/eval.yaml（打包运行放 exe 同级）可覆盖单个字段。
+policy:
+  judge_enabled: true             # language_judge 开关（一次 LLM 调用）
+  claim_llm_verify: false         # claim_audit 的 LLM 复核 pass（过滤正则误报，默认关）
+  claim_penalty_intensified: 15   # 强度/最高级断言未量化，每条扣分
+  claim_penalty_plain: 8          # 普通比较断言未量化，每条扣分
+  min_ratio: 0.85                 # 单节字数/预算下限（与 paper.draft 的门禁一致）
+  max_ratio: 1.30
+  max_section_share: 0.35         # 单节字数占全文比例上限
+weights:
+  claim_audit: 0.35
+  citation_consistency: 0.20
+  numeric_discipline: 0.20
+  structure_balance: 0.10
+  language_judge: 0.15

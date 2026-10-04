@@ -1,0 +1,11 @@
+# 基线分数：参考跑的质量评分快照，评分卡报告相对它的 delta。
+# 复制到 ~/.drpaper/baseline.yaml 可整体覆盖同名任务
+# （首次自跑后把 .output/<题目>/eval.json 里各任务分数填回）。
+meta:
+  note: "内置默认基线（首个参考跑）"
+tasks:
+  claim_audit: 90
+  citation_consistency: 100
+  numeric_discipline: 100
+  structure_balance: 95
+  language_judge: 80

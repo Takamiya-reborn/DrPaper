@@ -8,7 +8,7 @@ ToolBox 只做参数解析与结果装配，具体能力分层委托：
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,12 @@ from drpaper.agent.schemas import (
     HINT_TOO_LONG,
     HINT_TOO_SHORT,
     HINT_TOTAL_SHORT,
+    HINT_UNQUANTIFIED,
 )
+from drpaper.eval import run_evaluation
+from drpaper.eval.claims import scan_claims
+from drpaper.eval.config import EvalConfig, load_baseline, load_eval_config
+from drpaper.eval.tasks import HARD_KINDS
 from drpaper.export.docx_writer import export_docx
 from drpaper.export.naming import sanitize_filename
 from drpaper.export.style_profile import StyleProfile
@@ -56,6 +61,8 @@ class ToolBox:
     messages: list[dict[str, Any]] = field(default_factory=list)
     target_chars: int = 5000
     metrics: MetricStore = field(default_factory=MetricStore)
+    eval_config: EvalConfig = field(default_factory=load_eval_config)
+    baseline: dict[str, float] = field(default_factory=load_baseline)
     _issued_cells: list[str] = field(default_factory=list)
 
     def handlers(self) -> dict[str, Any]:
@@ -66,6 +73,7 @@ class ToolBox:
             "begin_draft": self._begin_draft,
             "submit_section": self._submit_section,
             "finish_draft": self._finish_draft,
+            "evaluate_draft": self._evaluate_draft,
             "remove_papers": self._remove_papers,
             "export_docx": self._export_docx,
             "load_skill": self._load_skill,
@@ -247,7 +255,46 @@ class ToolBox:
             return _result(
                 status="expected_value_error", errors=errors, hint=HINT_EXPECTED_VALUE
             )
-        return _result(status="ok", total_chars=total, sections=self._sections_detail())
+        # 比较性断言量化门禁：强度/最高级断言未量化则阻塞，普通比较只警告
+        unquantified = [
+            f
+            for f in scan_claims([(s.name, s.content) for s in self.draft.sections])
+            if f.backed_by == "none"
+        ]
+        hard = [f for f in unquantified if f.kind in HARD_KINDS]
+        if hard:
+            return _result(
+                status="unquantified_claims",
+                errors=[asdict(f) for f in unquantified],
+                hint=HINT_UNQUANTIFIED,
+            )
+        fields: dict[str, Any] = {
+            "status": "ok",
+            "total_chars": total,
+            "sections": self._sections_detail(),
+        }
+        if unquantified:
+            fields["warning"] = (
+                "存在未量化的比较性表述（不阻塞导出，建议改写后重新提交对应节）"
+            )
+        return _result(**fields)
+
+    def _evaluate_draft(self, _args: dict[str, Any]) -> str:
+        """运行固定标准任务集，落盘 eval.json 并返回总分与逐任务 delta。"""
+        self.draft.build_markdown()
+        scorecard = run_evaluation(
+            self.draft, self.llm, self._issued_cells, self.eval_config, self.baseline
+        )
+        out_dir = Path(self.output_dir) / sanitize_filename(
+            self.draft.title or "未命名论文"
+        )
+        path = scorecard.save(out_dir / "eval.json")
+        data = scorecard.to_dict()
+        data["path"] = str(path)
+        claims = next(t for t in scorecard.tasks if t.task == "claim_audit")
+        if claims.detail["unquantified"]:
+            data["hint"] = HINT_UNQUANTIFIED
+        return _result(**data)
 
     def _expected_value_errors(self) -> list[str]:
         """校验全文表格中的†单元格都原样来自 estimate_metric 的返回。"""

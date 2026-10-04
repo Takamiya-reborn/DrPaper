@@ -126,7 +126,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "finish_draft",
-            "description": "全部节提交后调用：校验各节齐全、总字数与引用一致性，拼接全文。通过后才可 export_docx。",
+            "description": "全部节提交后调用：校验各节齐全、总字数、引用一致性与比较性断言量化，拼接全文。通过后才可 evaluate_draft 或 export_docx。",
             "parameters": {"type": "object", "properties": {}},
         },
     },
@@ -147,6 +147,18 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 },
                 "required": ["indices"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "evaluate_draft",
+            "description": "定量评估当前草稿质量并生成基线对比分数：claim_audit（比较性断言量化度）、"
+            "citation_consistency（引用一致性）、structure_balance（结构均衡）、"
+            "numeric_discipline（数据纪律）、language_judge（语言质量）。"
+            "finish_draft 通过后、export_docx 前调用，结果保存为 eval.json 并报告相对基线的 delta；"
+            "返回 unquantified 非空时必须逐条改写为含量化支撑的表述。",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -211,4 +223,10 @@ HINT_EXPECTED_VALUE = (
     "表格中标†的数值必须原样使用 estimate_metric 返回的 cell 字符串（含区间与†），"
     "禁止改动数字；尚未估计的先调用 estimate_metric，"
     "返回 insufficient 或 no_match（降级估计也无法给出）时改用【待补充：……】。"
+)
+
+# 比较性断言缺少量化/引用支撑
+HINT_UNQUANTIFIED = (
+    "以下比较性断言没有数字、区间或引用支撑，须逐条改写：补上 estimate_metric 的具体数值与 [n] 引用，"
+    "或如实弱化措辞（改为趋势描述）；改写后重新 submit_section 受影响节，再 finish_draft。"
 )
