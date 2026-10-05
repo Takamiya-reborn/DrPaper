@@ -5,6 +5,13 @@ policy:
   max_total: 10             # 合并去重后返回给模型的最大条数（控制 token）
   min_authority_score: 0.0  # Tier-1 结果最高权威分低于该值也触发降级（0 = 关闭）
 sources:
+  local_library:
+    enabled: true
+    tier: 0                  # 用户文献优先级最高：先于所有在线源检索
+    weight: 1.0
+    max_results: 10
+    per_session_calls: 99    # 本地检索无配额成本，放开预算
+    paths: []                # 外接文献文件或目录（.bib/.ris/.jsonl），也可用 CLI --library 追加
   arxiv:
     enabled: true
     tier: 1

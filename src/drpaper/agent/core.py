@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from drpaper.agent.prompts import build_system_prompt
@@ -29,14 +30,17 @@ class PaperAgent:
     output_dir: str
     style: StyleProfile
     target_chars: int = 5000
+    library_paths: Sequence[str] = ()  # 用户外接文献库路径（CLI --library）
     messages: list[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         skills = SkillManager()
         self._skill_index = skills.index_prompt()
+        provider = default_aggregator(library_paths=self.library_paths)
+        self.library_warnings = provider.warnings  # 文献文件加载警告，启动时向用户展示
         # messages 传引用给 ToolBox（折叠旧稿用），后续只 append 不重新绑定
         self._toolbox = ToolBox(
-            provider=default_aggregator(),
+            provider=provider,
             llm=self.llm,
             draft=Draft(),
             output_dir=self.output_dir,

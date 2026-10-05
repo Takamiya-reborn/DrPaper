@@ -19,9 +19,9 @@ def clean_authors(names: Iterable[str]) -> list[str]:
 
 @dataclass(frozen=True)
 class Paper:
-    """一条真实文献的元数据（只能来自检索 API，不允许模型编造）。"""
+    """一条文献的元数据（检索 API 或用户外接文献文件均可；预期性内容只要明确标注即可用于引导实验方向）。"""
 
-    uid: str  # 唯一标识，如 arXiv ID 或 DOI
+    uid: str  # 唯一标识，如 arXiv ID、DOI 或 local:<hash>
     title: str
     authors: list[str]
     year: int
@@ -30,6 +30,7 @@ class Paper:
     tags: list[str] = field(default_factory=list)
     citations: int = 0  # 被引次数，权威度评分用；检索源未提供时为 0
     venue: str = ""  # 期刊/会议名，预印本或源未提供时为空
+    origin: str = ""  # "user" = 用户外接文献库，空串 = 在线检索源
 
     def reference_line(self, index: int) -> str:
         """生成 GB/T 7714 风格的参考文献条目。"""

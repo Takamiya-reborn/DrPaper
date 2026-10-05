@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import itertools
 import os
 import random
@@ -33,6 +34,22 @@ WELCOME = """\
 
 输入 exit 或按 Ctrl+C 退出。
 """
+
+
+def _parse_args() -> argparse.Namespace:
+    """解析启动参数：--library 外接本地文献库（可重复，文件或目录）。"""
+    parser = argparse.ArgumentParser(
+        prog="drpaper", description="中文学术写作 Agent：多源检索真实文献，生成中文论文初稿"
+    )
+    parser.add_argument(
+        "--library",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="外接本地文献库：.bib/.ris/.jsonl 文件或目录，可重复传入；"
+        "用户文献在检索结果中优先返回并优先引用（也可在 sources.yaml 的 paths 配置）",
+    )
+    return parser.parse_args()
 
 
 class StatusLine:
@@ -105,6 +122,7 @@ def main() -> None:
     """启动交互式会话。"""
     _use_utf8_stdio()
     os.system("")  # 启用 Windows 终端的 ANSI 转义
+    args = _parse_args()
     config = load_config()
     profile = load_profile()
     agent = PaperAgent(
@@ -115,7 +133,10 @@ def main() -> None:
         ),
         output_dir=config.output_dir,
         style=profile,
+        library_paths=args.library,
     )
+    for warning in agent.library_warnings:
+        print(warning, file=sys.stderr)
     # 会话累计 token：输入 / 输出
     usage_total = {"prompt": 0, "completion": 0}
     # 状态行实时计数器：已结算轮次 + 当前轮实时用量

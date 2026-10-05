@@ -33,4 +33,6 @@ def paper_card(paper: Paper, include_url: bool = False) -> dict:
         record["url"] = paper.url
     if paper.citations > 0:
         record["citations"] = paper.citations  # 权威度信号，供模型取舍
+    if paper.origin == "user":
+        record["user_library"] = True  # 用户外接文献，模型起草时优先引用
     return record

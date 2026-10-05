@@ -38,6 +38,7 @@ class SourceConfig:
     max_results: int
     per_session_calls: int
     api_key: str = ""
+    paths: tuple[str, ...] = ()  # 仅 local_library 用：外接文献文件或目录
 
 
 @dataclass(frozen=True)
@@ -60,11 +61,19 @@ def user_sources_path() -> Path:
 
 
 def load_sources_config() -> SourcesConfig:
-    """内置配置为底，用户文件浅合并覆盖同名字段；解析/校验失败抛带指引的 SystemExit。"""
+    """内置配置为底，用户文件浅合并覆盖；解析/校验失败抛带指引的 SystemExit。"""
     base = _read_yaml(BUILTIN_SOURCES_PATH)
     user_path = user_sources_path()
     user = _read_yaml(user_path) if user_path.is_file() else {}
     merged = {**base, **user}
+    if user.get("sources"):
+        # 源级浅合并：用户文件只覆盖出现的源与字段，其余沿用内置
+        merged_sources = dict(base.get("sources", {}))
+        for name, override in user["sources"].items():
+            entry = dict(merged_sources.get(name, {}))
+            entry.update(override or {})
+            merged_sources[name] = entry
+        merged["sources"] = merged_sources
 
     known = set(base.get("sources", {}))
     unknown = set(merged.get("sources", {})) - known
@@ -110,12 +119,13 @@ def _parse(data: dict, path: Path) -> SourcesConfig:
                 per_session_calls=int(raw["per_session_calls"]),
                 # openalex 段 mailto 与 api_key 两键等价，兼容两种写法
                 api_key=str(raw.get("api_key") or raw.get("mailto", "")),
+                paths=tuple(str(p) for p in (raw.get("paths") or [])),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise SystemExit(f"检索源「{name}」缺少或类型错误的字段：{path}\n{exc}") from None
-        if config.tier < 1 or config.weight < 0 or config.max_results < 1 or config.per_session_calls < 0:
+        if config.tier < 0 or config.weight < 0 or config.max_results < 1 or config.per_session_calls < 0:
             raise SystemExit(
-                f"检索源「{name}」数值不合法（tier ≥ 1，weight ≥ 0，max_results ≥ 1，per_session_calls ≥ 0）：{path}"
+                f"检索源「{name}」数值不合法（tier ≥ 0，0 = 本地文献库，weight ≥ 0，max_results ≥ 1，per_session_calls ≥ 0）：{path}"
             )
         sources[name] = _apply_env(name, config)
     return SourcesConfig(sources=sources, max_total=max_total, min_authority_score=min_score)

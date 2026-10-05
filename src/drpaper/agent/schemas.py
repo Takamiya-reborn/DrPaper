@@ -13,7 +13,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_literature",
-            "description": "在多个学术数据源（arXiv、OpenAlex、Semantic Scholar）检索真实文献，"
+            "description": "在多个学术数据源（arXiv、OpenAlex、Semantic Scholar，"
+            "以及用户外接的本地文献库，若有）检索真实文献，"
             "已跨源去重并按权威度排序合并。默认登记入文献库并返回引用编号（起草引用以此为准）；"
             "咨询类任务（问方向、荐论文、查新）传 register=false，结果不入库。",
             "parameters": {
