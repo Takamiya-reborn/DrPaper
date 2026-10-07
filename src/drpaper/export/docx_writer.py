@@ -12,10 +12,12 @@ from docx.shared import Cm, Pt
 from docx.table import Table as DocxTable
 
 from drpaper.export.guides import guide_for_heading
+from drpaper.export.math import latex_to_omml
 from drpaper.export.style_profile import StyleProfile, load_profile
 from drpaper.literature.base import Paper
 from drpaper.paper.markdown_parser import (
     HeadingNode,
+    MathNode,
     Node,
     ParagraphNode,
     TableNode,
@@ -47,6 +49,8 @@ def export_docx(
             _add_heading(document, node, profile)
         elif isinstance(node, TableNode):
             _add_table(document, node, profile)
+        elif isinstance(node, MathNode):
+            _add_display_math(document, node.text, profile)
         elif isinstance(node, ParagraphNode):
             _add_paragraph(document, node.runs, profile)
 
@@ -96,15 +100,42 @@ def _add_heading(document: Document, node: HeadingNode, profile: StyleProfile) -
         _attach_comment(document, paragraph, guide)
 
 
-def _add_paragraph(document: Document, runs: list[tuple[str, bool]], profile: StyleProfile) -> None:
+def _add_paragraph(document: Document, runs: list, profile: StyleProfile) -> None:
     paragraph = document.add_paragraph()
     paragraph.alignment = ALIGN_JUSTIFY
     paragraph.paragraph_format.line_spacing = profile.line_spacing
     paragraph.paragraph_format.first_line_indent = Pt(
         profile.body_pt * profile.first_line_indent_chars
     )
-    for text, bold in runs:
-        _set_fonts(paragraph.add_run(text), profile, profile.cn_body_font, profile.body_pt, bold=bold)
+    for run in runs:
+        if run.math:
+            _add_math_run(paragraph, run.text)
+        else:
+            _set_fonts(
+                paragraph.add_run(run.text),
+                profile,
+                profile.cn_body_font,
+                profile.body_pt,
+                bold=run.bold,
+            )
+
+
+def _add_display_math(document: Document, latex: str, profile: StyleProfile) -> None:
+    """渲染独立公式块：单独一段，居中。"""
+    paragraph = document.add_paragraph()
+    paragraph.alignment = ALIGN_CENTER
+    paragraph.paragraph_format.line_spacing = profile.line_spacing
+    _add_math_run(paragraph, latex)
+
+
+def _add_math_run(paragraph, latex: str) -> None:
+    """在段落中插入 Word 原生公式；转换失败时降级为斜体 LaTeX 原文。"""
+    element = latex_to_omml(latex)
+    if element is None:
+        run = paragraph.add_run(latex)
+        run.italic = True
+        return
+    paragraph._p.append(element)
 
 
 def _add_table(document: Document, node: TableNode, profile: StyleProfile) -> None:

@@ -4,7 +4,8 @@
 - `# 标题`   —— 论文题目
 - `## 节`    —— 一级节标题
 - `### 小节` —— 二级节标题
-- 普通段落   —— 支持 `**粗体**` 行内标记与 `[n]` 引用标记
+- 普通段落   —— 支持 `**粗体**` 行内标记、`$...$` 行内公式与 `[n]` 引用标记
+- `$$...$$`  —— 独立公式块（整行）
 - 管道表格   —— 表题行（`表 N：…`）+ 表头行 + `|---|` 分隔行 + 数据行
 """
 
@@ -29,11 +30,28 @@ class HeadingNode:
 
 
 @dataclass(frozen=True)
-class ParagraphNode:
-    """一个段落，runs 保留粗体行内格式：(文本, 是否加粗)。"""
+class Run:
+    """一个行内片段：math=True 时 text 为 LaTeX 公式源码（不含定界符）。"""
 
-    runs: list[tuple[str, bool]]
+    text: str
+    bold: bool = False
+    math: bool = False
+
+
+@dataclass(frozen=True)
+class ParagraphNode:
+    """一个段落，runs 保留粗体文本与行内公式的行内格式。"""
+
+    runs: list[Run]
     kind: Literal["paragraph"] = "paragraph"
+
+
+@dataclass(frozen=True)
+class MathNode:
+    """一个独立公式块（$$...$$），text 为 LaTeX 源码。"""
+
+    text: str
+    kind: Literal["math"] = "math"
 
 
 @dataclass(frozen=True)
@@ -46,9 +64,10 @@ class TableNode:
     kind: Literal["table"] = "table"
 
 
-Node = TitleNode | HeadingNode | ParagraphNode | TableNode
+Node = TitleNode | HeadingNode | ParagraphNode | MathNode | TableNode
 
-_BOLD_PATTERN = re.compile(r"\*\*(.+?)\*\*")
+# 行内标记：`**粗体**` 或 `$行内公式$`（两个分支互斥，粗体与公式不嵌套）
+_INLINE_PATTERN = re.compile(r"\*\*(.+?)\*\*|\$([^$\n]+?)\$")
 
 # 引用标记（如 [1]、[2, 3]）：全项目引用标记的唯一权威定义
 CITATION_PATTERN = re.compile(r"\[(\d{1,3}(?:,\s*\d{1,3})*)\]")
@@ -74,6 +93,12 @@ def parse(markdown: str) -> list[Node]:
         elif line.startswith("# "):
             _flush(buffer, nodes)
             nodes.append(TitleNode(text=line[2:].strip()))
+        elif line.startswith("$$"):
+            _flush(buffer, nodes)
+            if line.endswith("$$") and len(line) > 4:
+                nodes.append(MathNode(text=line[2:-2].strip()))
+            else:
+                i = _parse_display_math(line, lines[i + 1 :], nodes) + i
         elif _is_table_start(line, lines[i + 1 : i + 2]):
             _flush(buffer, nodes)
             caption = _pop_caption(nodes)
@@ -85,6 +110,20 @@ def parse(markdown: str) -> list[Node]:
         i += 1
     _flush(buffer, nodes)
     return nodes
+
+
+def _parse_display_math(first: str, rest: list[str], nodes: list[Node]) -> int:
+    """从 `$$` 起收集独立公式块直到闭合 `$$`，追加 MathNode；返回已消费的行数（不含首行）。"""
+    parts = [first[2:]]
+    consumed = 0
+    for line in rest:
+        consumed += 1
+        if "$$" in line:
+            parts.append(line.split("$$", 1)[0])
+            break
+        parts.append(line)
+    nodes.append(MathNode(text=" ".join(parts).strip()))
+    return consumed
 
 
 def _is_table_start(line: str, next_lines: list[str]) -> bool:
@@ -106,8 +145,8 @@ def _pop_caption(nodes: list[Node]) -> str:
     """
     if nodes and isinstance(nodes[-1], ParagraphNode):
         runs = nodes[-1].runs
-        if len(runs) == 1 and not runs[0][1] and _CAPTION_PATTERN.match(runs[0][0]):
-            return nodes.pop().runs[0][0]
+        if len(runs) == 1 and not runs[0].bold and _CAPTION_PATTERN.match(runs[0].text):
+            return nodes.pop().runs[0].text
     return ""
 
 
@@ -135,18 +174,21 @@ def _split_row(line: str) -> list[str]:
     return [p.strip() for p in parts]
 
 
-def parse_runs(text: str) -> list[tuple[str, bool]]:
-    """把段落文本拆为 (文本, 是否加粗) 行内片段序列。"""
-    runs: list[tuple[str, bool]] = []
+def parse_runs(text: str) -> list[Run]:
+    """把段落文本拆为行内片段序列：普通/粗体文本与 $...$ 行内公式。"""
+    runs: list[Run] = []
     pos = 0
-    for match in _BOLD_PATTERN.finditer(text):
+    for match in _INLINE_PATTERN.finditer(text):
         if match.start() > pos:
-            runs.append((text[pos:match.start()], False))
-        runs.append((match.group(1), True))
+            runs.append(Run(text[pos : match.start()]))
+        if match.group(1) is not None:
+            runs.append(Run(match.group(1), bold=True))
+        else:
+            runs.append(Run(match.group(2), math=True))
         pos = match.end()
     if pos < len(text):
-        runs.append((text[pos:], False))
-    return runs or [(text, False)]
+        runs.append(Run(text[pos:]))
+    return runs or [Run(text)]
 
 
 def extract_citations(text: str) -> set[int]:

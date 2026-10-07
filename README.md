@@ -21,6 +21,7 @@
 - [openai](https://pypi.org/project/openai/) SDK：调用 OpenAI 兼容接口的 LLM，流式输出 + tool-calling 循环
 - [arxiv](https://pypi.org/project/arxiv/)：arXiv 文献检索（OpenAlex / Semantic Scholar 走 REST API，标准库实现）
 - [python-docx](https://pypi.org/project/python-docx/)：生成符合学术排版规范的 docx
+- [pylatex](https://pypi.org/project/pylatex/) + [latex2mathml](https://pypi.org/project/latex2mathml/) + [mathml2omml](https://pypi.org/project/mathml2omml/)：数学公式支持——LaTeX 公式转 Word 原生公式，并同步导出可编译的 .tex 源码
 
 ## 功能
 
@@ -29,6 +30,7 @@
 - **多源真实检索**：每条参考文献均来自检索 API 返回的元数据（标题/作者/编号）。arXiv 与 OpenAlex 作为 Tier-1 源先行检索，Semantic Scholar 作为 Tier-2 源仅在结果不足时调用（省配额）；结果跨源去重、按权威度（引用数/载体/年份）排序后截断返回，控制 token 消耗。正文引用与文献库一一对应，导出前自动校验，杜绝编造文献
 - **外接本地文献库**：用 `--library` 挂入自己的文献（BibTeX / RIS / JSONL 文件或整个目录），用户文献优先级最高——最先检索、结果固定前置、与在线源撞车时保留用户版元数据、起草时优先引用（见[外接本地文献库](#外接本地文献库)）
 - **生成初稿**：按"摘要 → 关键词 → 引言 → 相关工作 → 方法 → 实验设计 → 结论与展望"的标准结构生成，按用户要求控制字数
+- **数学公式**：正文支持 LaTeX 语法的行内公式（`$...$`）与独立公式（`$$...$$`）；导出 docx 时自动转为 Word 原生公式对象（双击可编辑、随样式缩放），转换失败的公式降级为斜体原文并保留可读性，同时导出可编译的 .tex 源码（公式原样保留，用 XeLaTeX 编译可得排版完美的 PDF）
 - **规范排版 docx**：A4 页面、黑体标题、宋体正文（西文 Times New Roman）、小四字号、1.5 倍行距、首行缩进 2 字符、两端对齐、悬挂缩进参考文献；排版规范由样式档案（YAML）驱动，可自定义（见[自定义排版样式](#自定义排版样式)）
 - **预期数据估计**：写实验对比表前，Agent 先从文献库摘要中抽取真实实测数字（逐字校验，编造的数字无法通过），再做确定性统计估计——基线行是文献实测值（可溯源、标 [n] 引用），"本文方法"行是带†标记的预期区间：锚定最优基线、宽度取自文献间散布、下界刻意压低以对冲文献报告偏乐观的发表偏倚；可比实测值不足 3 条时拒绝估计、回退"【待补充】"占位。导出 Word 中†单元格黄色高亮并附批注，提醒替换为实测值（见[数据必须替换与勘误](#️-数据必须替换与勘误学术诚信底线)）
 - **基线校准评分**：对生成的论文做量化体检，杜绝"显著优于""好多了"这类无法定量的话——比较性断言（优于/显著提升/更好/远超…）必须带数字、†区间或 [n] 引用支撑，强度型断言未量化会被 finish_draft 直接拦截并逐条列出。全部节通过后调用 `evaluate_draft` 运行五个固定标准任务（断言量化度 / 引用一致性 / 结构均衡 / 数据纪律 / 语言质量），结果存为 `eval.json` 并报告相对基线的差值，让"这次比上次好多了"变成数字（见[质量评分与基线校准](#质量评分与基线校准)）
@@ -76,7 +78,7 @@ uv run drpaper --library "D:\文献\RAG 课题" --library my-refs.bib
 
 > 大语言模型在教育领域还有什么方向可做？推荐几篇能接着做的论文。
 
-生成结果在 `.output/<论文题目>/` 目录：`<论文题目>.docx`（交付文档）、`draft.md`（正文源稿）、`references.json`（文献库）、`eval.json`（质量评分卡，起草流程自动生成）。
+生成结果在 `.output/<论文题目>/` 目录：`<论文题目>.docx`（交付文档）、`<论文题目>.tex`（可编译的 LaTeX 源码）、`draft.md`（正文源稿）、`references.json`（文献库）、`eval.json`（质量评分卡，起草流程自动生成）。
 
 ## ⚠️ 数据必须替换与勘误（学术诚信底线）
 
@@ -317,7 +319,9 @@ src/drpaper/
     style_profile.py     #   样式档案：内置+用户两级目录的排版规范加载
     profiles/            #   内置排版样式档案（YAML）
     guides.py            #   写作指导批注（按节标题关键词匹配）
-    docx_writer.py       #   docx 导出（字体/缩进/批注）
+    math.py              #   公式转换：LaTeX → MathML → OMML（Word 原生公式）
+    docx_writer.py       #   docx 导出（字体/缩进/公式/批注）
+    tex_writer.py        #   .tex 源码导出（pylatex，公式原样保留）
 ```
 
 ### 扩展文献源

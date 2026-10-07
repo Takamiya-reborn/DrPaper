@@ -10,6 +10,7 @@ from typing import Any
 from drpaper.literature.base import Paper
 from drpaper.paper.markdown_parser import (
     HeadingNode,
+    MathNode,
     ParagraphNode,
     TableNode,
     TitleNode,
@@ -28,14 +29,21 @@ MIN_BUDGET_RATIO = 0.85
 MAX_BUDGET_RATIO = 1.3
 
 
-def _node_text(node: TitleNode | HeadingNode | ParagraphNode | TableNode) -> str:
-    """提取节点中的纯文本（含表格表题与单元格），供引用校验与统计。"""
+def _node_text(
+    node: TitleNode | HeadingNode | ParagraphNode | MathNode | TableNode,
+) -> str:
+    """提取节点中的纯文本（含表格表题与单元格），供引用校验与统计。
+
+    公式片段（LaTeX 源码）不参与提取，避免源码字符干扰引用与断言扫描。
+    """
     if isinstance(node, TableNode):
         cells = [node.caption, *node.header, *(c for row in node.rows for c in row)]
         return " ".join(cells)
     if isinstance(node, (TitleNode, HeadingNode)):
         return node.text
-    return "".join(t for t, _ in node.runs)
+    if isinstance(node, MathNode):
+        return ""
+    return "".join(r.text for r in node.runs if not r.math)
 
 
 @dataclass
@@ -189,10 +197,14 @@ class Draft:
                 cited |= extract_citations(text)
         for n in sorted(cited):
             if n < 1 or n > total:
-                errors.append(f"正文引用了 [{n}]，但文献库中没有该编号（当前共 {total} 条）。")
+                errors.append(
+                    f"正文引用了 [{n}]，但文献库中没有该编号（当前共 {total} 条）。"
+                )
         unused = [i + 1 for i in range(total) if i + 1 not in cited]
         if unused:
-            errors.append(f"文献库中未被正文引用的编号：{', '.join(map(str, unused))}。")
+            errors.append(
+                f"文献库中未被正文引用的编号：{', '.join(map(str, unused))}。"
+            )
         return errors
 
     # ---- 落盘 ----

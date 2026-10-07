@@ -115,8 +115,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "name": {"type": "string", "description": "节名，与大纲中完全一致"},
                     "content": {
                         "type": "string",
-                        "description": "该节正文（Markdown），可含 [n] 引用标记与 Markdown 表格"
-                        "（表题行'表 N：标题'紧贴表格上方），不含节标题行",
+                        "description": "该节正文（Markdown），可含 [n] 引用标记、Markdown 表格"
+                        "（表题行'表 N：标题'紧贴表格上方）与 LaTeX 公式"
+                        "（行内 $...$，独立公式整行 $$...$$，公式只能写在段落里），不含节标题行",
                     },
                 },
                 "required": ["name", "content"],
@@ -166,7 +167,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "export_docx",
-            "description": "把当前论文草稿导出为规范排版的 Word 文档。finish_draft 通过后调用。",
+            "description": "把当前论文草稿导出为规范排版的 Word 文档（公式转为 Word 原生公式），"
+            "并同步导出可编译的 .tex 源码。finish_draft 通过后调用。",
             "parameters": {"type": "object", "properties": {}},
         },
     },

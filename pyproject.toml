@@ -9,7 +9,10 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "arxiv>=2.2.0",
+    "latex2mathml>=3.81.1",
+    "mathml2omml>=0.0.2",
     "openai>=3.23.0",
+    "pylatex>=1.4.2",
     "python-docx>=1.2.0",
     "python-dotenv>=1.1.0",
     "pyyaml>=6.0.3",

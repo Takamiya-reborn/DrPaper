@@ -1,8 +1,9 @@
-"""Agent 工具：把文献检索、分节起草与 docx 导出包装成 LLM 可调用的工具。
+"""Agent 工具：把文献检索、分节起草与 docx/LaTeX 导出包装成 LLM 可调用的工具。
 
 ToolBox 只做参数解析与结果装配，具体能力分层委托：
 文献呈现 literature.present、字数与大纲校验 paper.draft、
-历史折叠 agent.history、文件命名 export.naming、skill 去重 skills.manager。
+历史折叠 agent.history、文件命名 export.naming、skill 去重 skills.manager、
+公式转换 export.math、LaTeX 渲染 export.tex_writer。
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from drpaper.eval.tasks import HARD_KINDS
 from drpaper.export.docx_writer import export_docx
 from drpaper.export.naming import sanitize_filename
 from drpaper.export.style_profile import StyleProfile
+from drpaper.export.tex_writer import export_tex
 from drpaper.literature.base import SearchProvider
 from drpaper.literature.present import paper_card
 from drpaper.llm.client import LLMClient
@@ -327,12 +329,18 @@ class ToolBox:
         docx_path = out_dir / f"{name}.docx"
         export_docx(nodes, self.draft.references, docx_path, profile=self.style)
         saved = self.draft.save(out_dir)
-        return _result(
-            status="ok",
-            docx=str(docx_path),
-            related_files=[str(p) for p in saved],
-            references=len(self.draft.references),
-        )
+        fields: dict[str, Any] = {
+            "status": "ok",
+            "docx": str(docx_path),
+            "related_files": [str(p) for p in saved],
+            "references": len(self.draft.references),
+        }
+        try:
+            tex_path = export_tex(nodes, self.draft.references, out_dir / f"{name}.tex")
+            fields["tex"] = str(tex_path)
+        except Exception as exc:  # tex 导出失败不阻塞 docx 交付
+            fields["tex_warning"] = f"LaTeX 源码导出失败: {exc}"
+        return _result(**fields)
 
     # ---- skill 加载 ----
 
