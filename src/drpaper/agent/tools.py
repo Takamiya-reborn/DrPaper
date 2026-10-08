@@ -29,6 +29,7 @@ from drpaper.eval.config import EvalConfig, load_baseline, load_eval_config
 from drpaper.eval.tasks import HARD_KINDS
 from drpaper.export.docx_writer import export_docx
 from drpaper.export.naming import sanitize_filename
+from drpaper.export.ppt_outline_writer import export_ppt_outline
 from drpaper.export.style_profile import StyleProfile
 from drpaper.export.tex_writer import export_tex
 from drpaper.literature.base import SearchProvider
@@ -328,11 +329,14 @@ class ToolBox:
         nodes = parse(self.draft.markdown)
         docx_path = out_dir / f"{name}.docx"
         export_docx(nodes, self.draft.references, docx_path, profile=self.style)
-        saved = self.draft.save(out_dir)
+        references_path = self.draft.save_references(out_dir)
+        ppt_json, ppt_markdown = export_ppt_outline(self.draft, out_dir, self.llm)
         fields: dict[str, Any] = {
             "status": "ok",
             "docx": str(docx_path),
-            "related_files": [str(p) for p in saved],
+            "related_files": [str(references_path), str(ppt_json), str(ppt_markdown)],
+            "ppt_outline": str(ppt_json),
+            "ppt_summary": str(ppt_markdown),
             "references": len(self.draft.references),
         }
         try:

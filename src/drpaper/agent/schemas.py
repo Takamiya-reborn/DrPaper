@@ -167,8 +167,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "export_docx",
-            "description": "把当前论文草稿导出为规范排版的 Word 文档（公式转为 Word 原生公式），"
-            "并同步导出可编译的 .tex 源码。finish_draft 通过后调用。",
+            "description": "把当前论文导出为规范排版的 Word 文档、可编译的 .tex 源码，"
+            "并生成可直接交给 PPT Agent 的 ppt_outline.json 和 ppt_outline.md；不输出原稿文件。"
+            "finish_draft 通过后调用。",
             "parameters": {"type": "object", "properties": {}},
         },
     },

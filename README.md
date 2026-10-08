@@ -78,7 +78,7 @@ uv run drpaper --library "D:\文献\RAG 课题" --library my-refs.bib
 
 > 大语言模型在教育领域还有什么方向可做？推荐几篇能接着做的论文。
 
-生成结果在 `.output/<论文题目>/` 目录：`<论文题目>.docx`（交付文档）、`<论文题目>.tex`（可编译的 LaTeX 源码）、`draft.md`（正文源稿）、`references.json`（文献库）、`eval.json`（质量评分卡，起草流程自动生成）。
+生成结果在 `.output/<论文题目>/` 目录：`<论文题目>.docx`（交付文档）、`<论文题目>.tex`（可编译的 LaTeX 源码）、`ppt_outline.json`（交给 PPT Agent 的结构化大纲）、`ppt_outline.md`（可人工查看和修改的 PPT 大纲与概括）、`references.json`（文献库）、`eval.json`（质量评分卡，起草流程自动生成）。最终导出不再保存正文原稿 `draft.md`。
 
 ## ⚠️ 数据必须替换与勘误（学术诚信底线）
 

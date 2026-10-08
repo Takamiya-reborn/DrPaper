@@ -225,3 +225,18 @@ class Draft:
             encoding="utf-8",
         )
         return [md_path, ref_path]
+
+    def save_references(self, output_dir: str | Path) -> Path:
+        """保存文献库；最终交付导出不再写入原稿文件。"""
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        ref_path = out / "references.json"
+        ref_path.write_text(
+            json.dumps(
+                [asdict(paper) for paper in self.references],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return ref_path
