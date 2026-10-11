@@ -185,19 +185,9 @@ sources:
 
 注意：挂载的文献同样只在检索命中并登记后才进入论文文献库（咨询调研的 `register=false` 检索不入库）；解析失败或路径不存在的文件会在启动时以警告列出，不中断会话。
 
-### 打包为 exe（可选）
+### 发行版用户指南
 
-需要分发给没有 Python 环境的 Windows 机器时，用 PyInstaller 打包：
-
-```bash
-uv run pyinstaller package.spec --noconfirm
-```
-
-产物为 `dist/drpaper/drpaper.exe`（单文件夹模式），整个 `dist/drpaper/` 文件夹需一起拷贝。exe 的使用方式与源码运行一致：
-
-1. 在运行 exe 的目录下创建 `.env` 文件（格式同 `.env.example`），填写 OPENAI_API_KEY
-2. 运行 `drpaper.exe`，进入交互式会话，输入方式同上
-3. 生成结果输出到运行目录下的 `.output/<论文题目>/`
+如果你拿到的是打包好的 Windows 发行版，不需要安装 Python 或 uv。请阅读单独的[发行版用户手册](USER_GUIDE.md)，其中包含解压、`.env` 配置、启动、输出文件、本地文献库、自定义资源和常见问题。
 
 ### 自定义排版样式
 
