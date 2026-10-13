@@ -60,8 +60,9 @@
 # 1. 安装依赖
 uv sync
 
-# 2. 配置 LLM API（OpenAI 兼容接口）
-cp .env.example .env   # 然后填写 OPENAI_API_KEY，可选 OPENAI_BASE_URL 和 CURRENT_MODEL
+# 2. 配置 LLM API（OpenAI 兼容接口或 Anthropic 原生接口）
+uv run drpaper         # 首次启动会在运行目录自动生成 .env 模板并提示路径
+                       # 填写 CURRENT_MODEL 与 OPENAI_API_KEY（或 ANTHROPIC_API_KEY）后再启动
 
 # 3. 启动交互式会话
 uv run drpaper
@@ -327,7 +328,7 @@ src/drpaper/
 `tier: 0` 保留给用户外接的本地文献库，其结果固定前置不被淘汰）、
 `weight`（权威分权重，影响合并排序）、`max_results`（单次向该源请求的条数上限）、
 `per_session_calls`（每会话对该源的最大调用次数，即预算分配）。
-API key 建议放 `.env`（`SEMANTIC_SCHOLAR_API_KEY` / `OPENALEX_MAILTO`），优先于 YAML。
+`SEMANTIC_SCHOLAR_API_KEY` / `OPENALEX_MAILTO` 建议放 `.env`，优先于 YAML。
 
 ### 评估参数调整
 

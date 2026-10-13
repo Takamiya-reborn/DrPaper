@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.13"
 dependencies = [
+    "anthropic>=1.13.0",
     "arxiv>=2.2.0",
     "latex2mathml>=3.81.1",
     "mathml2omml>=0.0.2",

@@ -12,10 +12,16 @@ import time
 from collections.abc import Callable
 
 from drpaper.agent.core import PaperAgent
-from drpaper.app.config import load_config
+from drpaper.app.config import configured_providers, detect_provider, load_config
 from drpaper.app.phrases import WORKING_PHRASES
+from drpaper.app.selector import select_option
 from drpaper.export.style_profile import load_profile
 from drpaper.llm.client import ChatCallbacks, LLMClient
+
+_PROVIDER_DESC = {
+    "openai": "OpenAI 兼容接口",
+    "anthropic": "Anthropic 原生接口",
+}
 
 WELCOME = """\
 === DrPaper —— 中文学术写作 Agent ===
@@ -123,13 +129,17 @@ def main() -> None:
     _use_utf8_stdio()
     os.system("")  # 启用 Windows 终端的 ANSI 转义
     args = _parse_args()
-    config = load_config()
+    provider = detect_provider()
+    if provider is None and len(configured_providers()) > 1:
+        provider = _select_provider(configured_providers())
+    config = load_config(provider)
     profile = load_profile()
     agent = PaperAgent(
         llm=LLMClient(
             api_key=config.api_key,
             base_url=config.base_url,
             model=config.model,
+            provider=config.provider,
         ),
         output_dir=config.output_dir,
         style=profile,
@@ -212,3 +222,20 @@ def main() -> None:
 def _print_stream(text: str) -> None:
     """流式打印模型正文输出。"""
     print(text, end="", flush=True)
+
+
+def _select_provider(candidates: list[str]) -> str:
+    """多个 API Key 时弹出菜单选择本次调用的接口；结果仅本次会话有效。"""
+    options = []
+    for name in candidates:
+        desc = _PROVIDER_DESC[name]
+        base_url = os.getenv(f"{name.upper()}_BASE_URL", "").strip()
+        if base_url:
+            desc += f"（{base_url}）"
+        options.append(f"{name.upper()}_API_KEY  {desc}")
+    idx = select_option(
+        "检测到多个 API 密钥，请选择本次调用的接口（↑/↓ 移动，Enter 确认）：", options
+    )
+    provider = candidates[idx]
+    print(f"已选择：{options[idx]}（仅本次会话有效）\n")
+    return provider

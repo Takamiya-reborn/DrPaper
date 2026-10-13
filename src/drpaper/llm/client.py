@@ -1,10 +1,13 @@
-"""LLM 客户端：封装 OpenAI 兼容接口与 tool-calling 循环。"""
+"""LLM 客户端：封装多 provider 对话接口与 tool-calling 循环。
+
+内部历史消息统一为 OpenAI 格式；Anthropic 由 llm.anthropic_backend 在请求
+边界做翻译，chat 循环、重试与空回复处理对上层完全一致。
+"""
 
 from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any
@@ -12,47 +15,52 @@ from typing import Any
 from openai import (
     APIConnectionError,
     APITimeoutError,
-    BadRequestError,
+    BadRequestError as OpenAIBadRequestError,
     InternalServerError,
     OpenAI,
     RateLimitError,
 )
 
-Message = dict[str, Any]
-Tool = dict[str, Any]
-ToolHandler = Callable[[dict[str, Any]], str]
+from drpaper.llm import anthropic_backend
+from drpaper.llm.types import ChatCallbacks, Message, Tool, ToolHandler
 
+__all__ = ["ChatCallbacks", "LLMClient", "Message", "Tool", "ToolHandler"]
 
-@dataclass
-class ChatCallbacks:
-    """chat 过程的事件回调，全部可选；由界面层实现渲染。"""
-
-    on_text: Callable[[str], None] | None = None             # 流式正文 token
-    on_first_token: Callable[[], None] | None = None         # 本轮首个正文 token 到达
-    on_round_start: Callable[[], None] | None = None         # 每次发起模型请求前
-    on_tool_start: Callable[[str, dict[str, Any]], None] | None = None  # (工具名, 参数)
-    on_tool_end: Callable[[str, float], None] | None = None  # (工具名, 耗时秒)
-    on_usage: Callable[[int, int, int], None] | None = None  # (输入, 输出, 合计) token
-
-
-# 瞬时异常：指数退避重试
-_TRANSIENT_ERRORS = (APIConnectionError, APITimeoutError, RateLimitError, InternalServerError)
+# 瞬时异常：指数退避重试（两套 SDK 的异常合并，请求路径只会抛出其一）
+_TRANSIENT_ERRORS = (
+    APIConnectionError,
+    APITimeoutError,
+    RateLimitError,
+    InternalServerError,
+    *anthropic_backend.TRANSIENT_ERRORS,
+)
+_BAD_REQUEST_ERRORS = (OpenAIBadRequestError, anthropic_backend.BadRequestError)
 
 _MAX_ATTEMPTS = 3      # 单次请求最大尝试次数
 _EMPTY_REPLIES = 2     # 空回复最多重试次数
 
 
 @dataclass
+class _StreamState:
+    """单次流式请求进度：正文是否已开始输出（决定异常后能否安全重试）。"""
+
+    received: bool = False
+
+
+@dataclass
 class LLMClient:
-    """OpenAI 兼容客户端，负责底层对话与工具执行。"""
+    """多 provider 客户端，负责底层对话与工具执行。"""
 
     api_key: str
     base_url: str
     model: str
+    provider: str = "openai"  # openai（含兼容接口）| anthropic
 
     @cached_property
-    def _client(self) -> OpenAI:
+    def _client(self) -> OpenAI | Any:
         """复用同一客户端，避免每轮对话重建 HTTP 连接池。"""
+        if self.provider == "anthropic":
+            return anthropic_backend.create_client(self.api_key, self.base_url)
         return OpenAI(api_key=self.api_key, base_url=self.base_url or None)
 
     def __post_init__(self) -> None:
@@ -141,64 +149,89 @@ class LLMClient:
     ) -> tuple[str, dict[int, dict[str, Any]], str]:
         """发起一次流式请求并消费，返回 (正文, 工具调用表, finish_reason)。"""
         for attempt in range(_MAX_ATTEMPTS):
-            received = False
-            first_token_fired = False
-            content_parts: list[str] = []
-            tool_calls: dict[int, dict[str, Any]] = {}
-            finish = ""
+            state = _StreamState()
             try:
-                stream = self._client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=tools or None,
-                    stream=True,
-                    **self._usage_kwargs(),
-                )
-                for chunk in stream:
-                    usage = getattr(chunk, "usage", None)
-                    if usage is not None and callbacks and callbacks.on_usage:
-                        callbacks.on_usage(
-                            usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
-                        )
-                    if not chunk.choices:  # 部分兼容服务会发 choices 为空的心跳/统计块
-                        continue
-                    received = True
-                    choice = chunk.choices[0]
-                    if choice.finish_reason:
-                        finish = choice.finish_reason
-                    delta = choice.delta
-                    if delta.content:
-                        if not first_token_fired:
-                            first_token_fired = True
-                            if callbacks and callbacks.on_first_token:
-                                callbacks.on_first_token()
-                        content_parts.append(delta.content)
-                        if callbacks and callbacks.on_text:
-                            callbacks.on_text(delta.content)
-                    for call in delta.tool_calls or []:
-                        slot = tool_calls.setdefault(
-                            call.index, {"id": call.id or "", "name": "", "arguments": ""}
-                        )
-                        if call.id:
-                            slot["id"] = call.id
-                        if call.function and call.function.name:
-                            slot["name"] += call.function.name
-                        if call.function and call.function.arguments:
-                            slot["arguments"] += call.function.arguments
-            except BadRequestError as exc:
-                # stream_options 不被支持：降级去掉该参数重试一次
-                if "stream_options" in str(exc):
+                content, tool_calls, finish = self._consume(messages, tools, callbacks, state)
+            except _BAD_REQUEST_ERRORS as exc:
+                # stream_options 不被支持：仅 openai 路径降级去掉该参数重试一次
+                if self.provider == "openai" and "stream_options" in str(exc):
                     self._usage_degraded = True
                     continue
                 raise
             except _TRANSIENT_ERRORS:
                 # 正文已流式打印给用户时重试会重复输出，只能放弃
-                if received or attempt == _MAX_ATTEMPTS - 1:
+                if state.received or attempt == _MAX_ATTEMPTS - 1:
                     raise
                 time.sleep(2**attempt)
                 continue
-            return "".join(content_parts), tool_calls, finish
+            return content, tool_calls, finish
         raise RuntimeError("请求重试次数耗尽")
+
+    def _consume(
+        self,
+        messages: list[Message],
+        tools: list[Tool],
+        callbacks: ChatCallbacks | None,
+        state: _StreamState,
+    ) -> tuple[str, dict[int, dict[str, Any]], str]:
+        """按 provider 分发到对应的流式消费实现。"""
+        if self.provider == "anthropic":
+            return anthropic_backend.consume_stream(
+                self._client, self.model, messages, tools, callbacks, state
+            )
+        return self._consume_openai(messages, tools, callbacks, state)
+
+    def _consume_openai(
+        self,
+        messages: list[Message],
+        tools: list[Tool],
+        callbacks: ChatCallbacks | None,
+        state: _StreamState,
+    ) -> tuple[str, dict[int, dict[str, Any]], str]:
+        """openai（含兼容接口）路径：发起一次流式请求并消费。"""
+        content_parts: list[str] = []
+        tool_calls: dict[int, dict[str, Any]] = {}
+        finish = ""
+        first_token_fired = False
+        stream = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=tools or None,
+            stream=True,
+            **self._usage_kwargs(),
+        )
+        for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None and callbacks and callbacks.on_usage:
+                callbacks.on_usage(
+                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                )
+            if not chunk.choices:  # 部分兼容服务会发 choices 为空的心跳/统计块
+                continue
+            state.received = True
+            choice = chunk.choices[0]
+            if choice.finish_reason:
+                finish = choice.finish_reason
+            delta = choice.delta
+            if delta.content:
+                if not first_token_fired:
+                    first_token_fired = True
+                    if callbacks and callbacks.on_first_token:
+                        callbacks.on_first_token()
+                content_parts.append(delta.content)
+                if callbacks and callbacks.on_text:
+                    callbacks.on_text(delta.content)
+            for call in delta.tool_calls or []:
+                slot = tool_calls.setdefault(
+                    call.index, {"id": call.id or "", "name": "", "arguments": ""}
+                )
+                if call.id:
+                    slot["id"] = call.id
+                if call.function and call.function.name:
+                    slot["name"] += call.function.name
+                if call.function and call.function.arguments:
+                    slot["arguments"] += call.function.arguments
+        return "".join(content_parts), tool_calls, finish
 
     def _usage_kwargs(self) -> dict[str, Any]:
         """token 统计参数；服务不支持时降级为空。"""

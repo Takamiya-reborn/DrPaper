@@ -17,45 +17,57 @@ D:\Apps\DrPaper\
 
 ## 2. 创建 `.env` 并填写模型配置
 
-在 **`drpaper.exe` 同级目录**新建一个名为 `.env` 的纯文本文件。注意文件名不是 `.env.txt`；在资源管理器中可以开启“文件扩展名”显示来确认。
+首次启动若没有 `.env`，程序会在 **`drpaper.exe` 同级目录**自动生成一个配置模板；也可以自己新建一个名为 `.env` 的纯文本文件。注意文件名不是 `.env.txt`；在资源管理器中可以开启“文件扩展名”显示来确认。
 
-最小配置如下：
+DrPaper 支持 OpenAI 兼容接口和 Anthropic 原生接口，两者填其一即可。最小配置如下：
 
 ```dotenv
+CURRENT_MODEL=你的模型名称
 OPENAI_API_KEY=你的_API_Key
 ```
 
-如果使用 OpenAI 官方接口，通常只需要这一项。如果使用其他兼容 OpenAI API 的服务，再填写接口地址和模型名：
+如果使用 OpenAI 官方接口，以上两项即可。如果使用其他兼容 OpenAI API 的服务，再填写接口地址：
 
 ```dotenv
+CURRENT_MODEL=你的模型名称
 OPENAI_API_KEY=你的_API_Key
 OPENAI_BASE_URL=https://你的服务地址/v1
-CURRENT_MODEL=你的模型名称
 ```
+
+如果使用 Anthropic 官方接口：
+
+```dotenv
+CURRENT_MODEL=claude-sonnet-4-5
+ANTHROPIC_API_KEY=你的_API_Key
+```
+
+同时填了两家密钥时，启动会出现选择菜单（方向键移动、Enter 确认），选定本次调用的接口；选择仅本次会话有效，下次启动会重新询问。只填写一个密钥则不会出现菜单。
 
 可用配置项：
 
-| 配置项                     | 必填 | 作用                                                               |
-| -------------------------- | ---- | ------------------------------------------------------------------ |
-| `OPENAI_API_KEY`           | 是   | LLM 服务的 API 密钥。DrPaper 不提供密钥，需向所用服务商申请        |
-| `OPENAI_BASE_URL`          | 否   | OpenAI 兼容接口的根地址；使用官方 OpenAI 时通常留空                |
-| `CURRENT_MODEL`            | 否   | 使用的模型名；不填时默认为 `gpt-4o-mini`，模型必须由接口服务商支持 |
-| `SEMANTIC_SCHOLAR_API_KEY` | 否   | Semantic Scholar 密钥；用于提高文献检索速率，不填也可使用免费额度  |
-| `OPENALEX_MAILTO`          | 否   | OpenAlex 礼貌池邮箱；用于提高请求稳定性，不填也可检索              |
-| `DRPAPER_OUTPUT_DIR`       | 否   | 输出目录；默认为运行目录下的 `.output`                             |
+| 配置项                     | 必填 | 作用                                                                     |
+| -------------------------- | ---- | ------------------------------------------------------------------------ |
+| `CURRENT_MODEL`            | 是   | 使用的模型名；必须由接口服务商支持                                       |
+| `OPENAI_API_KEY`           | 二选一 | OpenAI 或兼容服务的 API 密钥。DrPaper 不提供密钥，需向所用服务商申请  |
+| `ANTHROPIC_API_KEY`        | 二选一 | Anthropic 的 API 密钥                                                 |
+| `OPENAI_BASE_URL`          | 否   | OpenAI 兼容接口的根地址；使用官方 OpenAI 时通常留空                      |
+| `ANTHROPIC_BASE_URL`       | 否   | Anthropic 接口根地址；使用官方 Anthropic 时通常留空                      |
+| `SEMANTIC_SCHOLAR_API_KEY` | 否   | Semantic Scholar 密钥；用于提高文献检索速率，不填也可使用免费额度        |
+| `OPENALEX_MAILTO`          | 否   | OpenAlex 礼貌池邮箱；用于提高请求稳定性，不填也可检索                    |
+| `DRPAPER_OUTPUT_DIR`       | 否   | 输出目录；默认为运行目录下的 `.output`                                   |
 
-示例：
+示例（OpenAI 兼容服务）：
 
 ```dotenv
+CURRENT_MODEL=gpt-4o-mini
 OPENAI_API_KEY=sk-xxxxxxxx
 OPENAI_BASE_URL=https://api.openai.com/v1
-CURRENT_MODEL=gpt-4o-mini
 # SEMANTIC_SCHOLAR_API_KEY=可选
 # OPENALEX_MAILTO=你的邮箱
 # DRPAPER_OUTPUT_DIR=.output
 ```
 
-请不要把包含真实 API Key 的 `.env` 发给他人、提交到 Git，或截图公开。更换服务商时只需修改 `.env`，不需要重新解压或重新打包。
+请不要把包含真实密钥的 `.env` 发给他人、提交到 Git，或截图公开。更换服务商时只需修改 `.env`，不需要重新解压或重新打包。
 
 ## 3. 启动程序
 
@@ -129,9 +141,9 @@ sources:
 
 ## 常见问题
 
-**提示“未检测到 `OPENAI_API_KEY`”**
+**提示“未检测到 API 密钥”**
 
-确认 `.env` 与 `drpaper.exe` 在同一目录，文件名不是 `.env.txt`，并且配置格式为 `OPENAI_API_KEY=...`。从 PowerShell 进入 exe 目录后再运行，不要从不确定的工作目录启动。
+首次启动如果没有 `.env`，程序会在运行目录自动生成配置模板，并在提示中给出该文件的完整路径。用记事本打开提示中的 `.env`，填写 `CURRENT_MODEL=...` 和 `OPENAI_API_KEY=...`（或 `ANTHROPIC_API_KEY=...`），保存后重新启动。如果已有 `.env` 但没填 key，提示同样会给出文件路径，按路径检查填写即可。注意文件名不是 `.env.txt`；从 PowerShell 进入 exe 目录后再运行，不要从不确定的工作目录启动。
 
 **提示连接失败、超时或文献为空**
 
@@ -139,7 +151,7 @@ sources:
 
 **双击后窗口立即关闭**
 
-在 PowerShell 中运行 `.\drpaper.exe`，保留错误输出再排查。常见原因是 `.env` 缺失、API Key 无效、模型名错误或网络不可用。
+在 PowerShell 中运行 `.\drpaper.exe`，保留错误输出再排查。常见原因是 `.env` 缺失、密钥无效、模型名错误或网络不可用。
 
 **中文或状态动画显示异常**
 
