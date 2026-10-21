@@ -170,7 +170,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "description": "把当前论文导出为规范排版的 Word 文档、可编译的 .tex 源码，"
             "并生成可直接交给 PPT Agent 的 ppt_outline.json 和 ppt_outline.md；不输出原稿文件。"
             "finish_draft 通过后调用。",
-            "parameters": {"type": "object", "properties": {}},
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "include_guides": {
+                        "type": "boolean",
+                        "description": "是否附加写作指导批注（节标题写作要点、†预期值替换提醒）。"
+                        "默认 true；用户明确要求不加批注时传 false。",
+                    },
+                },
+            },
         },
     },
     {

@@ -320,15 +320,21 @@ class ToolBox:
 
     # ---- 导出 ----
 
-    def _export_docx(self, _args: dict[str, Any]) -> str:
+    def _export_docx(self, args: dict[str, Any]) -> str:
         errors = self.draft.citation_errors()
         if errors:
             return _result(status="blocked", errors=errors, hint=HINT_CITATION)
+        include_guides = args.get("include_guides", True)
+        if isinstance(include_guides, str):
+            include_guides = include_guides.strip().lower() not in {"false", "0", "no"}
         name = sanitize_filename(self.draft.title or "未命名论文")
         out_dir = Path(self.output_dir) / name
         nodes = parse(self.draft.markdown)
         docx_path = out_dir / f"{name}.docx"
-        export_docx(nodes, self.draft.references, docx_path, profile=self.style)
+        export_docx(
+            nodes, self.draft.references, docx_path, profile=self.style,
+            include_guides=include_guides,
+        )
         references_path = self.draft.save_references(out_dir)
         ppt_json, ppt_markdown = export_ppt_outline(self.draft, out_dir, self.llm)
         fields: dict[str, Any] = {

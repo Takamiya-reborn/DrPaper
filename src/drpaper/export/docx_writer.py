@@ -37,8 +37,12 @@ def export_docx(
     references: list[Paper],
     path: str | Path,
     profile: StyleProfile | None = None,
+    include_guides: bool = True,
 ) -> Path:
-    """按样式档案渲染草稿与文献库，写出 docx 文件；未指定档案时用默认规范。"""
+    """按样式档案渲染草稿与文献库，写出 docx 文件；未指定档案时用默认规范。
+
+    include_guides=False 时不附加任何批注（写作指导与†提醒）。
+    """
     profile = profile or load_profile()
     document = Document()
     _clear_metadata(document)
@@ -48,9 +52,9 @@ def export_docx(
         if isinstance(node, TitleNode):
             _add_title(document, node.text, profile)
         elif isinstance(node, HeadingNode):
-            _add_heading(document, node, profile)
+            _add_heading(document, node, profile, include_guides)
         elif isinstance(node, TableNode):
-            _add_table(document, node, profile)
+            _add_table(document, node, profile, include_guides)
         elif isinstance(node, MathNode):
             _add_display_math(document, node.text, profile)
         elif isinstance(node, ParagraphNode):
@@ -104,7 +108,9 @@ def _add_title(document: Document, text: str, profile: StyleProfile) -> None:
     _set_fonts(paragraph.add_run(text), profile, profile.cn_heading_font, profile.title_pt, bold=True)
 
 
-def _add_heading(document: Document, node: HeadingNode, profile: StyleProfile) -> None:
+def _add_heading(
+    document: Document, node: HeadingNode, profile: StyleProfile, include_guides: bool
+) -> None:
     size_pt = profile.heading1_pt if node.level == 1 else profile.body_pt
     paragraph = document.add_paragraph()
     paragraph.paragraph_format.line_spacing = profile.line_spacing
@@ -112,9 +118,10 @@ def _add_heading(document: Document, node: HeadingNode, profile: StyleProfile) -
     paragraph.paragraph_format.space_after = Cm(0.2)
     _set_fonts(paragraph.add_run(node.text), profile, profile.cn_heading_font, size_pt, bold=True)
 
-    guide = guide_for_heading(node.text)
-    if guide:
-        _attach_comment(document, paragraph, guide)
+    if include_guides:
+        guide = guide_for_heading(node.text)
+        if guide:
+            _attach_comment(document, paragraph, guide)
 
 
 def _add_paragraph(document: Document, runs: list, profile: StyleProfile) -> None:
@@ -155,7 +162,9 @@ def _add_math_run(paragraph, latex: str) -> None:
     paragraph._p.append(element)
 
 
-def _add_table(document: Document, node: TableNode, profile: StyleProfile) -> None:
+def _add_table(
+    document: Document, node: TableNode, profile: StyleProfile, include_guides: bool
+) -> None:
     """渲染学术三线表：表题居中加粗，顶线/底线 1.5pt，表头下线 0.75pt，无竖线。
 
     含†的预期值单元格加黄色高亮，并在表题上批注提醒学生替换为实测值。
@@ -181,7 +190,11 @@ def _add_table(document: Document, node: TableNode, profile: StyleProfile) -> No
         for col, text in enumerate(cells):
             if col < len(node.header):
                 _set_cell(table.cell(row, col), text, profile, highlight="†" in text)
-    if caption_paragraph and any("†" in c for row in node.rows for c in row):
+    if (
+        include_guides
+        and caption_paragraph
+        and any("†" in c for row in node.rows for c in row)
+    ):
         _attach_comment(
             document,
             caption_paragraph,
