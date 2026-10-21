@@ -30,37 +30,6 @@ _SYSTEM_PROMPT = """你是学术汇报编辑。请把论文内容整理成可以
 """
 
 
-def _fallback_outline(draft: Draft) -> dict[str, Any]:
-    """Create a usable outline when the model is unavailable or returns invalid JSON."""
-    slides: list[dict[str, Any]] = []
-    for number, section in enumerate(draft.sections, start=1):
-        content = " ".join(section.content.split())
-        points = [
-            part.strip() for part in re.split(r"[。！？；]", content) if part.strip()
-        ]
-        slides.append(
-            {
-                "number": number,
-                "title": section.name,
-                "summary": points[0][:160] if points else "本节暂无内容。",
-                "key_points": points[:5] or ["本节暂无内容。"],
-                "evidence": sorted(set(re.findall(r"\[\d+(?:,\d+)*\]", content))),
-                "visual_suggestion": "根据本节内容选择结构图、流程图或数据图表。",
-                "speaker_notes": content[:500],
-            }
-        )
-    return {
-        "title": draft.title,
-        "audience": "学术汇报",
-        "estimated_minutes": max(5, len(slides) * 2),
-        "slides": slides,
-        "references": [
-            {"number": i, "text": text}
-            for i, text in enumerate(draft.reference_lines(), start=1)
-        ],
-    }
-
-
 def _extract_json(text: str) -> dict[str, Any]:
     """Accept plain JSON and the occasional fenced JSON response."""
     candidate = text.strip()
@@ -139,12 +108,13 @@ def _markdown(outline: dict[str, Any]) -> str:
 
 
 def export_ppt_outline(draft: Draft, output_dir: Path, llm: Any) -> tuple[Path, Path]:
-    """Write JSON and Markdown PPT handoff files and return both paths."""
+    """Write JSON and Markdown PPT handoff files and return both paths.
+
+    模型调用或解析失败时直接抛出异常，由 agent 循环把错误作为
+    tool_result 喂回模型自行重试，不做静默回退。
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        outline = _model_outline(draft, llm)
-    except Exception:  # noqa: BLE001 - 模型失败时必须回退到确定性大纲
-        outline = _fallback_outline(draft)
+    outline = _model_outline(draft, llm)
     json_path = output_dir / "ppt_outline.json"
     markdown_path = output_dir / "ppt_outline.md"
     json_path.write_text(

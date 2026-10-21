@@ -165,7 +165,7 @@ def main() -> None:
 
     print(WELCOME)
     print(f"当前排版规范：{profile.name}\n")
-    turn = 0
+    round_usage = {"prompt": 0, "completion": 0}
     while True:
         try:
             user_input = input("\n你> ").strip()
@@ -178,7 +178,6 @@ def main() -> None:
             print("再见，祝写作顺利！")
             break
 
-        turn += 1
         round_usage = {"prompt": 0, "completion": 0}
 
         def on_usage(
@@ -198,10 +197,6 @@ def main() -> None:
         print("\nDrPaper> ", end="", flush=True)
         try:
             agent.chat(user_input, callbacks=callbacks)
-            if turn == 1 and not agent.last_target_detected:
-                print(
-                    "（未检测到目标字数，默认按 5000 字撰写，可随时说「改成 8000 字」调整。）"
-                )
         except KeyboardInterrupt:
             print("\n[已中断本轮，可继续输入]", file=sys.stderr)
         except Exception as exc:  # noqa: BLE001 - 单轮异常不终止会话

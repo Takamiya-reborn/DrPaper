@@ -40,6 +40,29 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "set_target_chars",
+            "description": "设置全文目标字数，影响大纲预算校验与 finish_draft 的总字数门禁。"
+            "用户对全文篇幅提出要求时调用，如「正文 8000 字左右」「写篇 1.5 万字的」"
+            "「帮我把字数改成 6000」「来篇五千词的论文」；「1.5 万」须换算为 15000。"
+            "起草请求自带字数要求（如「写篇 8000 字的论文」）时，必须先调用本工具设定目标，"
+            "再进入检索与起草，保证大纲预算与总字数门禁按该目标校验。"
+            "用户只描述局部篇幅（如「摘要 300 字」「每节 800 字」「第 3 节扩到 1200 字」）"
+            "或未提字数时不调用；各节篇幅分配用 begin_draft 的 sections 预算表达，不要用本工具。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_chars": {
+                        "type": "integer",
+                        "description": "目标字数（整数），「N 万字」换算为 N*10000，最低 500",
+                    },
+                },
+                "required": ["target_chars"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "estimate_metric",
             "description": "为实验对比表估计指标区间：从文献库摘要抽取真实实测数字做统计估计。"
             "写含性能数字的对比表前必须先调用；返回的 baselines 用于基线行（标 [n] 引用），"

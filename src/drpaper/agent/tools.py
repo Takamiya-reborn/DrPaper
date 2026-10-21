@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from drpaper.agent.history import fold_old_section_drafts
+from drpaper.agent.prompts import build_system_prompt
 from drpaper.agent.schemas import (
     HINT_CITATION,
     HINT_EXPECTED_VALUE,
@@ -61,6 +62,7 @@ class ToolBox:
     output_dir: str
     style: StyleProfile
     skills: SkillManager
+    skill_index: str  # 系统提示词的 skill 索引，改目标字数后需重建提示词
     messages: list[dict[str, Any]] = field(default_factory=list)
     target_chars: int = 5000
     metrics: MetricStore = field(default_factory=MetricStore)
@@ -72,6 +74,7 @@ class ToolBox:
         """工具名 → 处理函数，供 LLM 循环执行。"""
         return {
             "search_literature": self._search_literature,
+            "set_target_chars": self._set_target_chars,
             "estimate_metric": self._estimate_metric,
             "begin_draft": self._begin_draft,
             "submit_section": self._submit_section,
@@ -110,6 +113,27 @@ class ToolBox:
                 record["index"] = numbers[paper.uid]
             results.append(record)
         return _result(query=query, results=results)
+
+    # ---- 目标字数 ----
+
+    def _set_target_chars(self, args: dict[str, Any]) -> str:
+        raw = args.get("target_chars")
+        try:
+            target = int(raw)
+        except (TypeError, ValueError):
+            return _error("target_chars 必须是整数")
+        if target < 500:
+            return _error(
+                "目标字数过小（最低 500）。若用户描述的是局部篇幅，"
+                "应改用 begin_draft 的各节预算表达，不要调用本工具"
+            )
+        if target == self.target_chars:
+            return _result(
+                status="ok", target_chars=target, note="与当前目标一致，未变更"
+            )
+        self.target_chars = target
+        self.messages[0]["content"] = build_system_prompt(self.skill_index, target)
+        return _result(status="ok", target_chars=target)
 
     # ---- 指标估计 ----
 
@@ -332,7 +356,10 @@ class ToolBox:
         nodes = parse(self.draft.markdown)
         docx_path = out_dir / f"{name}.docx"
         export_docx(
-            nodes, self.draft.references, docx_path, profile=self.style,
+            nodes,
+            self.draft.references,
+            docx_path,
+            profile=self.style,
             include_guides=include_guides,
         )
         references_path = self.draft.save_references(out_dir)

@@ -53,10 +53,7 @@ def extract_records(llm: LLMClient, papers: list[Paper]) -> list[MetricRecord]:
         {"role": "system", "content": _EXTRACT_SYSTEM},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
-    try:
-        text = llm.chat(messages, [], {})
-    except Exception:  # noqa: BLE001 - 抽取失败不应中断起草，退化为无可比文献
-        return []
+    text = llm.chat(messages, [], {})
     records: list[MetricRecord] = []
     for item in _parse_json_array(text):
         record = _verified_record(item, abstracts)
@@ -66,13 +63,19 @@ def extract_records(llm: LLMClient, papers: list[Paper]) -> list[MetricRecord]:
 
 
 def _parse_json_array(text: str) -> list:
-    """解析 LLM 输出中的 JSON 数组，容忍代码块包裹；解析失败返回空。"""
+    """解析 LLM 输出中的 JSON 数组，容忍代码块包裹。
+
+    解析失败抛 ValueError，由 agent 循环把错误喂回模型重试；
+    静默返回空会让 estimate_metric 误报"文献库中没有可比实测值"。
+    """
     stripped = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.S)
     try:
         data = json.loads(stripped)
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"指标抽取结果不是合法 JSON: {exc}") from exc
+    if not isinstance(data, list):
+        raise ValueError("指标抽取结果不是 JSON 数组")
+    return data
 
 
 def _verified_record(item: object, abstracts: dict[str, str]) -> MetricRecord | None:
