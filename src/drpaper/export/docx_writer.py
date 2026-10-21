@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from docx import Document
@@ -40,6 +41,7 @@ def export_docx(
     """按样式档案渲染草稿与文献库，写出 docx 文件；未指定档案时用默认规范。"""
     profile = profile or load_profile()
     document = Document()
+    _clear_metadata(document)
     _setup_page(document, profile)
 
     for node in nodes:
@@ -61,6 +63,21 @@ def export_docx(
     out.parent.mkdir(parents=True, exist_ok=True)
     document.save(out)
     return out
+
+
+def _clear_metadata(document: Document) -> None:
+    """清空默认模板遗留的作者等元数据，避免导出文件带错误署名误导使用者。"""
+    props = document.core_properties
+    props.author = ""
+    props.last_modified_by = ""
+    props.title = ""
+    props.subject = ""
+    props.keywords = ""
+    props.comments = ""
+    props.category = ""
+    now = datetime.now(timezone.utc)
+    props.created = now
+    props.modified = now
 
 
 def _setup_page(document: Document, profile: StyleProfile) -> None:
