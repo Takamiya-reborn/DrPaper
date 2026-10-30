@@ -14,3 +14,6 @@ wheels/
 
 # 生成的论文文件
 .output/
+
+# 运行工作区（暂存文件）
+.drpaper/
