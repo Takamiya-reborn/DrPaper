@@ -94,7 +94,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "begin_draft",
             "description": "开始起草论文：提交题目、大纲与各节字数预算。各节预算之和应等于目标字数。"
-            "之后逐节 submit_section，全部完成后 finish_draft。",
+            "用户未给出明确研究主题时不得调用本工具，先向用户追问。"
+            "提交成功后提纲进入待确认状态：须向用户展示提纲并请求确认，"
+            "用户确认后调用 confirm_outline 解锁写作；未确认前 submit_section 会被拒绝。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -128,9 +130,22 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "confirm_outline",
+            "description": "提纲经用户确认后调用，解锁逐节写作（submit_section）。"
+            "仅在用户对提纲明确表态后调用：「可以」「没问题，开始写」视为确认；"
+            "用户要求修改时按意见调整并重新 begin_draft，再次请求确认；"
+            "用户明确要求跳过确认直接写时也可调用。"
+            "提纲提交后的同一轮内用户尚未回应，调用会被拒绝。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "submit_section",
             "description": "提交一节正文（Markdown 段落，不含节标题行）。"
             "name 必须与 begin_draft 中的节名完全一致；同名重复提交为覆盖修改。"
+            "提纲未经用户确认（confirm_outline）前调用会被拒绝。"
             "每节字数低于预算 85% 或超出预算 130% 会被拒绝，须按预算自行调整后重交，禁止反问用户。",
             "parameters": {
                 "type": "object",
@@ -229,6 +244,20 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 # ---- 结果提示文案（与 schema 描述同属对模型的指令）----
+
+# 提纲已提交，等待用户确认（硬性流程节点）
+HINT_OUTLINE_PENDING = (
+    "提纲已提交、尚未生效：向用户简短报告题目与各节安排并请求确认"
+    "（一两句话即可，禁止整篇复述提纲或输出正文），本轮到此为止。"
+    "用户确认后调用 confirm_outline 解锁写作；用户要求修改时调整后重新 begin_draft。"
+    "用户未回应前禁止 submit_section，也不得自行调用 confirm_outline。"
+)
+
+# 提纲未经用户确认就提交正文
+HINT_NOT_CONFIRMED = (
+    "提纲尚未经用户确认。若用户已表示同意，先调用 confirm_outline 再提交正文；"
+    "否则先向用户展示提纲并等待确认，禁止继续写作。"
+)
 
 # 各节未提交齐全
 HINT_INCOMPLETE = "全部节提交后再调用 finish_draft"

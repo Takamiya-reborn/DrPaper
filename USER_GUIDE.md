@@ -45,16 +45,16 @@ ANTHROPIC_API_KEY=你的_API_Key
 
 可用配置项：
 
-| 配置项                     | 必填 | 作用                                                                     |
-| -------------------------- | ---- | ------------------------------------------------------------------------ |
-| `CURRENT_MODEL`            | 是   | 使用的模型名；必须由接口服务商支持                                       |
-| `OPENAI_API_KEY`           | 二选一 | OpenAI 或兼容服务的 API 密钥。DrPaper 不提供密钥，需向所用服务商申请  |
-| `ANTHROPIC_API_KEY`        | 二选一 | Anthropic 的 API 密钥                                                 |
-| `OPENAI_BASE_URL`          | 否   | OpenAI 兼容接口的根地址；使用官方 OpenAI 时通常留空                      |
-| `ANTHROPIC_BASE_URL`       | 否   | Anthropic 接口根地址；使用官方 Anthropic 时通常留空                      |
-| `SEMANTIC_SCHOLAR_API_KEY` | 否   | Semantic Scholar 密钥；用于提高文献检索速率，不填也可使用免费额度        |
-| `OPENALEX_MAILTO`          | 否   | OpenAlex 礼貌池邮箱；用于提高请求稳定性，不填也可检索                    |
-| `DRPAPER_OUTPUT_DIR`       | 否   | 输出目录；默认为运行目录下的 `.output`                                   |
+| 配置项                     | 必填   | 作用                                                                 |
+| -------------------------- | ------ | -------------------------------------------------------------------- |
+| `CURRENT_MODEL`            | 是     | 使用的模型名；必须由接口服务商支持                                   |
+| `OPENAI_API_KEY`           | 二选一 | OpenAI 或兼容服务的 API 密钥。DrPaper 不提供密钥，需向所用服务商申请 |
+| `ANTHROPIC_API_KEY`        | 二选一 | Anthropic 的 API 密钥                                                |
+| `OPENAI_BASE_URL`          | 否     | OpenAI 兼容接口的根地址；使用官方 OpenAI 时通常留空                  |
+| `ANTHROPIC_BASE_URL`       | 否     | Anthropic 接口根地址；使用官方 Anthropic 时通常留空                  |
+| `SEMANTIC_SCHOLAR_API_KEY` | 否     | Semantic Scholar 密钥；用于提高文献检索速率，不填也可使用免费额度    |
+| `OPENALEX_MAILTO`          | 否     | OpenAlex 礼貌池邮箱；用于提高请求稳定性，不填也可检索                |
+| `DRPAPER_OUTPUT_DIR`       | 否     | 输出目录；默认为运行目录下的 `.output`                               |
 
 示例（OpenAI 兼容服务）：
 

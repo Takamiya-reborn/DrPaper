@@ -9,8 +9,9 @@ description: 撰写或全文重写论文时加载——结构模板、各节字�
 
 1. 若文献库为空，先用 search_literature 从 2~4 个角度检索（研究主题、方法名、应用场景），确保引用有据可依。
 2. 调用 begin_draft 提交题目、大纲与各节字数预算：按下方占比表把用户目标字数 N 分配到各节，全部节预算之和必须等于 N；"摘要"固定 200~300 字，"关键词"budget 填 0。
-3. 逐节调用 submit_section；写各节前可按需加载 `references/sections.md` 查看该节写法要点，加载 `references/patterns.md` 查看该节可用的论证序列与句式骨架。
-4. 全部节提交后调用 finish_draft 校验，通过后调用 export_docx 导出。
+3. 向用户展示提纲并请求确认（硬性节点）；用户确认后调用 confirm_outline 解锁写作，用户要求修改时调整大纲重新 begin_draft 并再次请求确认。
+4. 逐节调用 submit_section；写各节前可按需加载 `references/sections.md` 查看该节写法要点，加载 `references/patterns.md` 查看该节可用的论证序列与句式骨架。
+5. 全部节提交后调用 finish_draft 校验，通过后调用 export_docx 导出。
 
 ## 结构模板
 

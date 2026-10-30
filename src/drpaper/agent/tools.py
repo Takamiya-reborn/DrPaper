@@ -19,6 +19,8 @@ from drpaper.agent.schemas import (
     HINT_CITATION,
     HINT_EXPECTED_VALUE,
     HINT_INCOMPLETE,
+    HINT_NOT_CONFIRMED,
+    HINT_OUTLINE_PENDING,
     HINT_TOO_LONG,
     HINT_TOO_SHORT,
     HINT_TOTAL_SHORT,
@@ -69,6 +71,8 @@ class ToolBox:
     eval_config: EvalConfig = field(default_factory=load_eval_config)
     baseline: dict[str, float] = field(default_factory=load_baseline)
     _issued_cells: list[str] = field(default_factory=list)
+    _outline_confirmed: bool = False  # 提纲确认硬门禁：确认前禁止 submit_section
+    _outline_submitted_at: int = -1  # begin_draft 成功时的历史长度，用于识别用户是否已回应
 
     def handlers(self) -> dict[str, Any]:
         """工具名 → 处理函数，供 LLM 循环执行。"""
@@ -77,6 +81,7 @@ class ToolBox:
             "set_target_chars": self._set_target_chars,
             "estimate_metric": self._estimate_metric,
             "begin_draft": self._begin_draft,
+            "confirm_outline": self._confirm_outline,
             "submit_section": self._submit_section,
             "finish_draft": self._finish_draft,
             "evaluate_draft": self._evaluate_draft,
@@ -184,10 +189,14 @@ class ToolBox:
         except ValueError as exc:
             return _error(str(exc))
         self.draft.begin(title, sections)
+        # 重新提交提纲即重置确认状态：每次动笔前都要过一遍用户确认
+        self._outline_confirmed = False
+        self._outline_submitted_at = len(self.messages)
         fields: dict[str, Any] = {
-            "status": "ok",
+            "status": "pending_confirmation",
             "sections": [{"name": s.name, "budget": s.budget} for s in sections],
             "target_chars": self.target_chars,
+            "hint": HINT_OUTLINE_PENDING,
         }
         total_budget = sum(s.budget for s in sections)
         deviation = abs(total_budget - self.target_chars) / max(self.target_chars, 1)
@@ -197,7 +206,26 @@ class ToolBox:
             )
         return _result(**fields)
 
+    def _confirm_outline(self, _args: dict[str, Any]) -> str:
+        """标记提纲已经用户确认；结构性校验：用户未回应提纲前不得自行确认。"""
+        if not self.draft.sections:
+            return _error("尚未提交提纲，应先调用 begin_draft")
+        if self._outline_confirmed:
+            return _result(status="ok", note="提纲此前已确认，可直接 submit_section")
+        replied = any(
+            m.get("role") == "user" for m in self.messages[self._outline_submitted_at + 1 :]
+        )
+        if not replied:
+            return _error(
+                "用户尚未对提纲作出回应，禁止自行确认；"
+                "请结束本轮，向用户展示提纲并等待回复"
+            )
+        self._outline_confirmed = True
+        return _result(status="ok", note="提纲已确认，开始逐节 submit_section")
+
     def _submit_section(self, args: dict[str, Any]) -> str:
+        if not self._outline_confirmed:
+            return _error("提纲未经用户确认，禁止提交正文", hint=HINT_NOT_CONFIRMED)
         name = str(args.get("name", "")).strip()
         content = str(args.get("content", "")).strip()
         if not content:

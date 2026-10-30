@@ -31,9 +31,15 @@
 
 ## P1-1 意图模糊时的澄清与确认 gate
 
-- [ ] 工具 description 中声明：必填信息缺失时，模型应先向用户追问而不是猜参数
-- [ ] "写作前先出提纲 → 用户确认 → 再动笔"做成硬性流程节点（类似 Claude Code 的 plan mode）
-- [ ] 验证：输入"帮我写篇论文"这类宽泛指令时，agent 先追问研究方向/要求，而不是直接开写
+- [x] 工具 description 中声明：必填信息缺失时，模型应先向用户追问而不是猜参数
+      （系统提示词新增「澄清优先」铁律：一次问全，禁止猜参数/编造题目；信息足够时不得反复追问）
+- [x] "写作前先出提纲 → 用户确认 → 再动笔"做成硬性流程节点（类似 Claude Code 的 plan mode）
+      （新增 confirm_outline 工具：begin_draft 后提纲待确认，结构性校验保证用户未回应时模型不得自行确认；
+      未确认前 submit_section 直接拒绝；用户明确要求跳过确认时可放行；重新 begin_draft 重置确认状态）
+- [x] 验证：输入"帮我写篇论文"这类宽泛指令时，agent 先追问研究方向/要求，而不是直接开写
+      （tests/test_p1_clarify_gate.py 5 项门禁机制测试；
+      scripts/verify_p1_clarify.py 真实 LLM 三场景 3/3：宽泛指令先追问、提纲提交后停在确认节点、
+      确认后 confirm_outline 先于 submit_section）
 
 ## P1-2 章节写作拆分为 subagent（按类别分层组织代码）
 
