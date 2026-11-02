@@ -3,7 +3,9 @@
 ToolBox 只做参数解析与结果装配，具体能力分层委托：
 文献呈现 literature.present、字数与大纲校验 paper.draft、
 历史折叠 agent.history、文件命名 export.naming、skill 去重 skills.manager、
-公式转换 export.math、LaTeX 渲染 export.tex_writer。
+公式转换 export.math、LaTeX 渲染 export.tex_writer；
+系统性调研、逐节写作与审校分别委托 agents/ 下的三个子代理，
+主对话只回收结构化摘要，不持有子代理的中间过程。
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from drpaper.agent.schemas import (
     HINT_TOTAL_SHORT,
     HINT_UNQUANTIFIED,
 )
+from drpaper.agents import ResearchAgent, ReviewerAgent, WriterAgent
 from drpaper.eval import run_evaluation
 from drpaper.eval.claims import scan_claims
 from drpaper.eval.config import EvalConfig, load_baseline, load_eval_config
@@ -37,8 +40,8 @@ from drpaper.export.style_profile import StyleProfile
 from drpaper.export.tex_writer import export_tex
 from drpaper.literature.base import SearchProvider
 from drpaper.literature.present import paper_card
-from drpaper.llm.client import LLMClient
-from drpaper.paper.draft import Draft, parse_outline
+from drpaper.llm.client import ChatCallbacks, LLMClient
+from drpaper.paper.draft import Draft, Section, parse_outline
 from drpaper.paper.markdown_parser import TableNode, extract_citations, parse
 from drpaper.paper.metrics import MetricStore, estimate_graded, expected_cell_errors
 from drpaper.paper.wordcount import count_chars
@@ -70,8 +73,15 @@ class ToolBox:
     metrics: MetricStore = field(default_factory=MetricStore)
     eval_config: EvalConfig = field(default_factory=load_eval_config)
     baseline: dict[str, float] = field(default_factory=load_baseline)
+    # 当前 chat 的界面回调，PaperAgent.chat 每轮注入；子代理透传工具事件
+    callbacks: ChatCallbacks | None = None
+    research_notes: list[dict[str, Any]] = field(default_factory=list)  # 调研资料卡（编号+标题+要点）
+    section_digests: dict[str, str] = field(default_factory=dict)  # 各节内容摘要（主循环持有的"各章摘要"）
+    subagent_usage: dict[str, int] = field(
+        default_factory=lambda: {"prompt": 0, "completion": 0}
+    )  # 子代理 token 用量（与主循环分开统计）
     _issued_cells: list[str] = field(default_factory=list)
-    _outline_confirmed: bool = False  # 提纲确认硬门禁：确认前禁止 submit_section
+    _outline_confirmed: bool = False  # 提纲确认硬门禁：确认前禁止 submit_section / write_section
     _outline_submitted_at: int = -1  # begin_draft 成功时的历史长度，用于识别用户是否已回应
 
     def handlers(self) -> dict[str, Any]:
@@ -80,9 +90,12 @@ class ToolBox:
             "search_literature": self._search_literature,
             "set_target_chars": self._set_target_chars,
             "estimate_metric": self._estimate_metric,
+            "research_topic": self._research_topic,
             "begin_draft": self._begin_draft,
             "confirm_outline": self._confirm_outline,
+            "write_section": self._write_section,
             "submit_section": self._submit_section,
+            "review_draft": self._review_draft,
             "finish_draft": self._finish_draft,
             "evaluate_draft": self._evaluate_draft,
             "remove_papers": self._remove_papers,
@@ -179,6 +192,146 @@ class ToolBox:
         ]
         self._issued_cells.append(result["cell"])
         return _result(**result)
+
+    # ---- 子代理派发（调研 / 写作 / 审校）----
+
+    def _sub_callbacks(self) -> ChatCallbacks:
+        """子代理的事件回调：透传工具与轮次事件，token 单独计入 subagent_usage。"""
+        wrapped = ChatCallbacks()
+        if self.callbacks is not None:
+            wrapped.on_round_start = self.callbacks.on_round_start
+            wrapped.on_tool_start = self.callbacks.on_tool_start
+            wrapped.on_tool_end = self.callbacks.on_tool_end
+        usage = self.subagent_usage
+
+        def _on_usage(prompt: int, completion: int, _total: int) -> None:
+            usage["prompt"] += prompt
+            usage["completion"] += completion
+
+        wrapped.on_usage = _on_usage
+        return wrapped
+
+    def _research_topic(self, args: dict[str, Any]) -> str:
+        topic = str(args.get("topic", "")).strip()
+        if not topic:
+            return _error("topic 不能为空")
+        agent = ResearchAgent(llm=self.llm, search=self._search_literature)
+        outcome = agent.run(topic, callbacks=self._sub_callbacks())
+        if outcome["status"] != "ok":
+            return _error(outcome["reason"])
+        # 资料卡按编号合并去重后存入会话状态，写作子代理经任务注入取用
+        merged = {card["index"]: card for card in self.research_notes}
+        merged.update({card["index"]: card for card in outcome["findings"]})
+        self.research_notes = sorted(merged.values(), key=lambda card: card["index"])
+        return _result(
+            status="ok",
+            summary=outcome["summary"],
+            findings=self.research_notes,
+            note="资料卡已存入会话状态，write_section 时自动提供给写作子代理",
+        )
+
+    def _write_section(self, args: dict[str, Any]) -> str:
+        if not self._outline_confirmed:
+            return _error("提纲未经用户确认，禁止写作", hint=HINT_NOT_CONFIRMED)
+        name = str(args.get("name", "")).strip()
+        guidance = str(args.get("guidance", "")).strip()
+        try:
+            section = self.draft.get_section(name)
+        except KeyError as exc:
+            return _error(str(exc), missing=self.draft.missing_sections())
+        writer = WriterAgent(
+            llm=self.llm,
+            draft=self.draft,
+            estimate_metric=self._estimate_metric,
+            section_name=name,
+        )
+        outcome = writer.run(self._writer_task(section, guidance), callbacks=self._sub_callbacks())
+        if outcome["status"] != "ok":
+            return _error(
+                f"写作子代理未能提交该节: {outcome['reason']}",
+                hint="可携带更具体的 guidance 重试，或改用 submit_section 直接提交",
+            )
+        self.section_digests[name] = outcome["digest"]
+        fold_old_section_drafts(self.messages, name)
+        fields: dict[str, Any] = {
+            "status": "ok",
+            "section": name,
+            "chars": outcome["chars"],
+            "budget": outcome["budget"],
+            "digest": outcome["digest"],
+            "progress": self._progress(),
+        }
+        if outcome.get("warning"):
+            fields["warning"] = outcome["warning"]
+        return _result(**fields)
+
+    def _writer_task(self, section: Section, guidance: str) -> str:
+        """组装写作子代理的任务描述：大纲、前文摘要、资料卡与补充要求。"""
+        outline = "\n".join(
+            f"- {s.name}（预算 {s.budget or '不限'} 字{'，已完成' if s.content else ''}）"
+            for s in self.draft.sections
+        )
+        done = "\n".join(
+            f"- {name}：{digest}"
+            for name, digest in self.section_digests.items()
+            if name != section.name
+        )
+        notes = "\n".join(
+            f"- [{card['index']}] {card['title']}——{card['key_point']}"
+            for card in self.research_notes
+        ) or "（暂无调研资料卡，可调用 read_reference 查看文献库现有文献）"
+        current = (
+            f"\n该节当前已有内容（本次为重写，按 guidance 调整后重新提交）：\n{section.content}\n"
+            if section.content
+            else ""
+        )
+        return (
+            f"论文题目：{self.draft.title}\n"
+            f"大纲与各节预算：\n{outline}\n"
+            f"你负责撰写：「{section.name}」，字数预算 {section.budget or '不限'} 字。\n"
+            f"{current}"
+            + (f"已完成各节的内容摘要（承接衔接，禁止重复其内容）：\n{done}\n" if done else "")
+            + f"调研资料卡（引用编号 [n] 以此为准）：\n{notes}\n"
+            f"（文献库当前共 {len(self.draft.references)} 条，可用 read_reference 查看某条详情）\n"
+            + (f"补充要求：{guidance}\n" if guidance else "")
+            + "写完该节后调用 save_section 提交。"
+        )
+
+    def _review_draft(self, args: dict[str, Any]) -> str:
+        written = [s for s in self.draft.sections if s.content]
+        if not written:
+            return _error("尚无已提交的章节内容，先 write_section 再审校")
+        focus = str(args.get("focus", "")).strip()
+        reviewer = ReviewerAgent(llm=self.llm)
+        outcome = reviewer.run(
+            self._reviewer_task(written, focus), callbacks=self._sub_callbacks()
+        )
+        if outcome["status"] != "ok":
+            return _error(outcome["reason"])
+        return _result(
+            status="ok",
+            summary=outcome["summary"],
+            issues=outcome["issues"],
+            note="意见需逐条处理：整节改动走 write_section 附 guidance，小改直接 submit_section",
+        )
+
+    def _reviewer_task(self, written: list[Section], focus: str) -> str:
+        """组装审校子代理的任务描述：已提交章节全文 + 文献条目 + 关注点。"""
+        body = "\n\n".join(f"## {s.name}\n\n{s.content}" for s in written)
+        refs = "\n".join(self.draft.reference_lines())
+        try:
+            checklist = self.skills.load("paper-review")
+        except KeyError:  # 未安装审校 skill 时跳过参考清单
+            checklist = ""
+        extra = f"\n\n审校参考清单（内置 paper-review skill）：\n{checklist}\n" if checklist else ""
+        return (
+            f"论文题目：{self.draft.title}\n\n"
+            f"已提交章节全文：\n\n{body}\n\n"
+            f"参考文献库：\n{refs}\n"
+            f"{extra}"
+            + (f"用户关注的审校重点：{focus}\n" if focus else "")
+            + "审校完成后调用 submit_review 提交意见列表。"
+        )
 
     def _begin_draft(self, args: dict[str, Any]) -> str:
         title = str(args.get("title", "")).strip()
@@ -368,6 +521,8 @@ class ToolBox:
             indices = [int(n) for n in raw]
         except (TypeError, ValueError):
             return _error("indices 必须是整数列表")
+        # 编号会重排，按旧编号记录的资料卡随之失效
+        self.research_notes = []
         return _result(result=self.draft.remove_papers(indices))
 
     # ---- 导出 ----

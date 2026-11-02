@@ -43,11 +43,22 @@
 
 ## P1-2 章节写作拆分为 subagent（按类别分层组织代码）
 
-- [ ] 新建子代理模块，按类别分层：`agents/research/`、`agents/writer/`、`agents/reviewer/`
-- [ ] 每个子代理是独立的完整 agent loop，拥有独立上下文
-- [ ] 子代理只向主循环返回结构化摘要（调研返回资料卡，写作返回章节文本，审校返回意见列表）
-- [ ] 主循环只持有提纲 + 各章摘要，不持有子代理的中间过程
-- [ ] 验证：写一篇 5 章论文，主上下文 Token 消耗相比拆分前明显下降，且各章风格一致
+- [x] 新建子代理模块，按类别分层：`agents/research/`、`agents/writer/`、`agents/reviewer/`
+      （`agents/base.py` 骨架：独立消息历史 + 独立工具集 + 独立轮次上限；结构化产物由 submit 类工具处理器捕获，不走最终回复）
+- [x] 每个子代理是独立的完整 agent loop，拥有独立上下文
+      （调研复用主循环检索 handler 共享文献库；写作子代理预算自纠正在自身 loop 内完成，正文经 save_section 直写共享 Draft）
+- [x] 子代理只向主循环返回结构化摘要（调研返回资料卡，写作返回章节文本，审校返回意见列表）
+      （写作交回 digest 不交正文；审校交回分级意见列表；系统提示词对每节完全一致保证风格统一）
+- [x] 主循环只持有提纲 + 各章摘要，不持有子代理的中间过程
+      （tools.py 新增 research_topic / write_section / review_draft 与 research_notes / section_digests / subagent_usage 状态；
+      prompts.py 起草角色改为总控 + 分工纪律铁律；审校/评估/导出等后续阶段的小幅直改仍允许 submit_section，单次超 300 字视为整节重写）
+- [x] 验证：写一篇 5 章论文，主上下文 Token 消耗相比拆分前明显下降，且各章风格一致
+      （tests/test_p1_subagents.py 7 项 + 既有套件 26/26；scripts/verify_p1_subagents.py 真实 LLM 5/5，
+      12,000 字规模对比口径为「纯写作 turn 内主上下文增量」——排除 turn 起点固定开销，只计随正文线性增长的部分：
+      旧路径（逐节 submit_section）+8,247 → 新路径（write_section 委托）+1,560 tokens，下降 81%，判定线 <70%；
+      结构性保证同轮验证：整节正文零泄漏进主对话、7 节 digest 齐全、审校返回分级意见列表；
+      配套 client.py chat() 新增错误熔断：同一工具重复相同错误达 3 次停止执行本轮剩余调用并注入纠偏提示，
+      重蹈覆辙超 2 次终止任务——验证中曾出现模型跳过 confirm_outline 后 153 次重试写节的死循环，熔断封顶此类损失）
 
 ## P1-3 Workflow 文档化（Skills 式）
 

@@ -105,6 +105,55 @@ def test_unknown_file_error_fed_back(tmp_path) -> None:
     assert any("error" in text for text in tool_results)
 
 
+# ---- 错误熔断：同一工具重复相同错误不再无限循环 ----
+
+
+def test_repeated_tool_error_terminates_loop(tmp_path) -> None:
+    """同一工具反复返回相同错误：熔断停止执行剩余调用，重蹈覆辙超限即终止。"""
+    agent = agent_with(
+        [
+            [
+                _chunk(
+                    tool_calls=[_tool_call("nope", {}, index=i) for i in range(5)],
+                    finish="tool_calls",
+                )
+            ]
+        ],
+        tmp_path,  # 只剩一轮时重复返回，模拟每轮 5 个相同错误调用的死循环
+    )
+    agent.messages.append({"role": "user", "content": "x"})
+    reply = agent.llm.chat(
+        agent.messages,
+        [],
+        {},  # 无 handler → 固定错误「未知工具」
+        max_rounds=20,
+    )
+    assert "重复错误循环" in reply  # 熔断超限终止，而不是烧满 20 轮
+    tool_results = [m["content"] for m in agent.messages if m.get("role") == "tool"]
+    assert sum("熔断生效" in t for t in tool_results) > 0  # 触发后同批剩余调用只占位
+    assert any("重复无效调用" in m["content"] for m in agent.messages if m["role"] == "user")
+
+
+def test_error_counter_resets_after_success(tmp_path) -> None:
+    """工具恢复正常后清空其错误计数：间隔出现的错误不触发熔断。"""
+    calls = {"n": 0}
+
+    def flaky(_args):
+        calls["n"] += 1
+        return '{"ok": true}' if calls["n"] % 3 == 0 else '{"error": "暂时不行"}'
+
+    rounds = [
+        [_chunk(tool_calls=[_tool_call("flaky", {})], finish="tool_calls")]
+        for _ in range(5)
+    ]
+    rounds.append([_chunk(content="完成。", finish="stop")])
+    agent = agent_with(rounds, tmp_path)
+    reply = agent.llm.chat(
+        [{"role": "user", "content": "x"}], [], {"flaky": flaky}, max_rounds=20
+    )
+    assert reply == "完成。"  # 错误-错误-成功-错误-错误：两次内未连续超限，不熔断
+
+
 # ---- P0-2：删除静默回退分支 ----
 
 

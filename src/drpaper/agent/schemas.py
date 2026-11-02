@@ -63,6 +63,26 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "research_topic",
+            "description": "系统性文献调研：派出调研子代理围绕课题多角度检索真实文献，返回资料卡"
+            "（编号、标题、核心要点），资料卡会存入会话状态供写作子代理引用。"
+            "论文起草前调用；写作过程中需要补充某方面文献时也可再次调用。"
+            "单次快查或咨询（结果不入库、不返回编号）仍用 search_literature 传 register=false。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "调研课题，一句话说清研究问题，如 '大语言模型幻觉的缓解方法'",
+                    },
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "estimate_metric",
             "description": "为实验对比表估计指标区间：从文献库摘要抽取真实实测数字做统计估计。"
             "写含性能数字的对比表前必须先调用；返回的 baselines 用于基线行（标 [n] 引用），"
@@ -142,6 +162,28 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "write_section",
+            "description": "派出写作子代理撰写或重写指定一节：子代理在独立上下文中按字数预算写作、"
+            "自行校验字数并把正文写入草稿，主对话只返回该节的内容摘要（digest）。"
+            "逐节起草与整节改写（含按审校意见修改）都用本工具；"
+            "一两句话的局部微调才用 submit_section。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "节名，与大纲中完全一致"},
+                    "guidance": {
+                        "type": "string",
+                        "description": "可选，写作要求：侧重内容、必须覆盖的要点，"
+                        "或按审校意见修改的具体条目（意见原文传入）",
+                    },
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "submit_section",
             "description": "提交一节正文（Markdown 段落，不含节标题行）。"
             "name 必须与 begin_draft 中的节名完全一致；同名重复提交为覆盖修改。"
@@ -159,6 +201,24 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                 },
                 "required": ["name", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "review_draft",
+            "description": "派出审校子代理对已提交章节做整体审校，返回按严重程度分级的问题列表"
+            "（结构、论证、表达与引用规范）。全部节写完后、finish_draft 前调用；"
+            "返回意见需逐条处理：整节改动走 write_section 附 guidance，小改直接 submit_section。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "focus": {
+                        "type": "string",
+                        "description": "可选，本次审校的关注点，如 '论证是否充分'",
+                    },
+                },
             },
         },
     },
@@ -255,7 +315,7 @@ HINT_OUTLINE_PENDING = (
 
 # 提纲未经用户确认就提交正文
 HINT_NOT_CONFIRMED = (
-    "提纲尚未经用户确认。若用户已表示同意，先调用 confirm_outline 再提交正文；"
+    "提纲尚未经用户确认。若用户已表示同意，先调用 confirm_outline 解锁写作；"
     "否则先向用户展示提纲并等待确认，禁止继续写作。"
 )
 

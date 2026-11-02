@@ -38,6 +38,12 @@ _BAD_REQUEST_ERRORS = (OpenAIBadRequestError, anthropic_backend.BadRequestError)
 
 _MAX_ATTEMPTS = 3      # 单次请求最大尝试次数
 _EMPTY_REPLIES = 2     # 空回复最多重试次数
+_LOOP_BREAKS = 3       # 同一工具重复相同错误达此次数即熔断本轮剩余调用
+_MAX_BREAKS = 2        # 熔断后仍重蹈覆辙的次数上限，超过直接终止本轮任务
+_LOOP_STUB = json.dumps(
+    {"error": "熔断生效，本轮剩余调用未执行；请先按上文提示纠正后再继续"},
+    ensure_ascii=False,
+)
 
 
 @dataclass
@@ -80,8 +86,11 @@ class LLMClient:
         - 流式输出正文到 on_text 回调，工具执行经由 on_tool_start/end 通知
         - 每轮模型请求工具则执行后继续，直到给出纯文本回复
         - 工具轮次正文为空是预期行为（界面负责状态提示），不算空回复
+        - 同一工具重复相同错误达 _LOOP_BREAKS 次即熔断，重蹈覆辙超限则终止任务
         """
         empty_retries = 0
+        error_counts: dict[tuple[str, str], int] = {}  # (工具名, 错误结果) → 出现次数
+        breaks = 0
         for _ in range(max_rounds):
             if callbacks and callbacks.on_round_start:
                 callbacks.on_round_start()
@@ -117,10 +126,41 @@ class LLMClient:
                         ],
                     }
                 )
+                # 错误熔断：模型对同一错误反复重试会白烧轮次并污染上下文，
+                # 达阈值后停止执行本轮剩余调用并注入纠偏提示
+                tripped = False
                 for slot in tool_calls.values():
-                    result = _run_handler(handlers, slot["name"], slot["arguments"], callbacks)
+                    if tripped:
+                        result = _LOOP_STUB
+                    else:
+                        result = _run_handler(
+                            handlers, slot["name"], slot["arguments"], callbacks
+                        )
                     messages.append(
                         {"role": "tool", "tool_call_id": slot["id"], "content": result}
+                    )
+                    if result.startswith('{"error"'):
+                        key = (slot["name"], result)
+                        error_counts[key] = error_counts.get(key, 0) + 1
+                        tripped = tripped or error_counts[key] >= _LOOP_BREAKS
+                    else:
+                        # 工具恢复正常即清其错误计数，避免误熔断后续合法重试
+                        for k in [k for k in error_counts if k[0] == slot["name"]]:
+                            del error_counts[k]
+                if tripped:
+                    breaks += 1
+                    if breaks > _MAX_BREAKS:
+                        return (
+                            "（工具调用陷入重复错误循环，已中止本轮任务。"
+                            "请总结当前进度与卡点，或换一种做法重试。）"
+                        )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "（同一工具连续返回相同错误，说明你在重复无效调用。"
+                            "停止重试，先按最近一次错误提示改做正确操作；"
+                            "仍无法解决时向用户说明情况并结束本轮。）",
+                        }
                     )
                 continue
 

@@ -26,12 +26,18 @@ def chunk(content=None, tool_calls=None, finish=None) -> SimpleNamespace:
 
 
 class FakeCompletions:
-    """每次 create 消耗脚本中的一轮；只剩一轮时重复返回（测轮次上限用）。"""
+    """每次 create 消耗脚本中的一轮；只剩一轮时重复返回（测轮次上限用）。
+
+    requests 记录每次请求收到的消息历史（主循环与子代理按调用顺序混排），
+    供测试核对子代理的独立上下文与系统提示词。
+    """
 
     def __init__(self, rounds: list[list[SimpleNamespace]]) -> None:
         self.rounds = rounds
+        self.requests: list[list[dict]] = []
 
-    def create(self, **_kwargs):
+    def create(self, **kwargs):
+        self.requests.append(kwargs["messages"])
         if len(self.rounds) > 1:
             return iter(self.rounds.pop(0))
         return iter(self.rounds[0])

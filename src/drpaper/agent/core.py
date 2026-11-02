@@ -54,6 +54,7 @@ class PaperAgent:
 
     def chat(self, user_input: str, callbacks: ChatCallbacks | None = None) -> str:
         """处理一轮用户输入，返回最终回复文本。"""
+        self._toolbox.callbacks = callbacks  # 子代理透传工具事件、单独统计 token
         self.messages.append({"role": "user", "content": user_input})
         reply = self.llm.chat(
             self.messages,
