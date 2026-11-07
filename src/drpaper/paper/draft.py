@@ -144,6 +144,47 @@ class Draft:
                 parts.append(f"## {section.name}\n\n{section.content}")
         self.markdown = "\n\n".join(parts) + "\n"
 
+    # ---- 状态快照（会话持久化用）----
+
+    def dump_state(self) -> dict[str, Any]:
+        """草稿完整状态快照：题目、大纲各节与文献库，供 SessionStore 落盘。"""
+        return {
+            "title": self.title,
+            "sections": [
+                {"name": s.name, "budget": s.budget, "content": s.content}
+                for s in self.sections
+            ],
+            "references": [asdict(p) for p in self.references],
+        }
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        """从快照恢复草稿；非法条目跳过，不阻塞会话其余状态的恢复。"""
+        self.title = str(state.get("title", ""))
+        self.sections = []
+        for item in state.get("sections", []):
+            if not isinstance(item, dict) or not str(item.get("name", "")).strip():
+                continue
+            try:
+                budget = max(0, int(item.get("budget", 0)))
+            except (TypeError, ValueError):
+                budget = 0
+            self.sections.append(
+                Section(
+                    name=str(item["name"]).strip(),
+                    budget=budget,
+                    content=str(item.get("content", "")),
+                )
+            )
+        self.references = []
+        for item in state.get("references", []):
+            if not isinstance(item, dict):
+                continue
+            try:
+                self.references.append(Paper(**item))
+            except TypeError:
+                continue
+        self._uid_to_index = {p.uid: i for i, p in enumerate(self.references, start=1)}
+
     # ---- 文献库 ----
 
     def add_papers(self, papers: list[Paper]) -> dict[str, int]:

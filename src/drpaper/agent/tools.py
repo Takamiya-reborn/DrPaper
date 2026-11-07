@@ -4,8 +4,8 @@ ToolBox 只做参数解析与结果装配，具体能力分层委托：
 文献呈现 literature.present、字数与大纲校验 paper.draft、
 历史折叠 agent.history、文件命名 export.naming、skill 去重 skills.manager、
 公式转换 export.math、LaTeX 渲染 export.tex_writer；
-流程阶段文档按需注入 workflows.manager；
-系统性调研、逐节写作与审校分别委托 agents/ 下的三个子代理，
+流程阶段文档按需注入 workflows.manager；任务清单 agent.todo 随会话快照
+（agent.session）持久化，每次工具调用后落盘，支撑断点续跑；
 系统性调研、逐节写作与审校分别委托 agents/ 下的三个子代理，
 主对话只回收结构化摘要，不持有子代理的中间过程。
 """
@@ -30,6 +30,8 @@ from drpaper.agent.schemas import (
     HINT_TOTAL_SHORT,
     HINT_UNQUANTIFIED,
 )
+from drpaper.agent.session import SessionStore
+from drpaper.agent.todo import TodoList
 from drpaper.agents import ResearchAgent, ReviewerAgent, WriterAgent
 from drpaper.eval import run_evaluation
 from drpaper.eval.claims import scan_claims
@@ -73,7 +75,10 @@ class ToolBox:
     skill_index: str  # 系统提示词的 skill 索引，改目标字数后需重建提示词
     workflows: WorkflowManager  # 流程文档管理：进入新阶段时随工具结果注入阶段文档
     workflow_index: str  # 系统提示词的 workflow 索引，改目标字数后需重建提示词
+    store: SessionStore | None = None  # 会话状态落盘：每次工具调用后写快照；None 不持久化
     messages: list[dict[str, Any]] = field(default_factory=list)
+    todo: TodoList = field(default_factory=TodoList)  # 任务清单：随会话持久化，断点续跑依据
+    resume_block: str = ""  # 断点恢复提示块，重建系统提示词（改字数）时需原样保留
     target_chars: int = 5000
     metrics: MetricStore = field(default_factory=MetricStore)
     eval_config: EvalConfig = field(default_factory=load_eval_config)
@@ -106,8 +111,24 @@ class ToolBox:
             "remove_papers": self._remove_papers,
             "export_docx": self._export_docx,
             "load_skill": self._load_skill,
+            "read_todo": self._read_todo,
+            "update_todo": self._update_todo,
         }
-        return {name: self._with_stage_doc(name, fn) for name, fn in raw.items()}
+        return {
+            name: self._with_persist(self._with_stage_doc(name, fn))
+            for name, fn in raw.items()
+        }
+
+    def _with_persist(self, fn: Any) -> Any:
+        """调用成功后把会话快照落盘一次（断点续跑：状态变更即时持久化）。"""
+
+        def wrapped(args: dict[str, Any]) -> str:
+            result = fn(args)
+            if self.store is not None:
+                self.store.save(self.snapshot())
+            return result
+
+        return wrapped
 
     def _with_stage_doc(self, name: str, fn: Any) -> Any:
         """调用后把当前阶段的流程文档附在工具结果尾部（WorkflowManager 去重）。"""
@@ -166,8 +187,9 @@ class ToolBox:
                 status="ok", target_chars=target, note="与当前目标一致，未变更"
             )
         self.target_chars = target
-        self.messages[0]["content"] = build_system_prompt(
-            self.skill_index, self.workflow_index, target
+        self.messages[0]["content"] = (
+            build_system_prompt(self.skill_index, self.workflow_index, target)
+            + self.resume_block
         )
         return _result(status="ok", target_chars=target)
 
@@ -590,7 +612,58 @@ class ToolBox:
         except (KeyError, ValueError, FileNotFoundError) as exc:
             return _error(str(exc))
 
+    # ---- 任务清单 ----
+
+    def _read_todo(self, _args: dict[str, Any]) -> str:
+        if not self.todo.steps:
+            return _result(steps=[], note="当前没有任务清单")
+        return _result(steps=self.todo.to_json(), progress=self.todo.progress())
+
+    def _update_todo(self, args: dict[str, Any]) -> str:
+        try:
+            self.todo.replace(args.get("steps"))
+        except ValueError as exc:
+            return _error(str(exc))
+        return _result(
+            status="ok",
+            steps=self.todo.to_json(),
+            progress=self.todo.progress(),
+            note="清单已持久化到磁盘，进程中断后重启可据此续跑",
+        )
+
     # ---- 内部装配 ----
+
+    def snapshot(self) -> dict[str, Any]:
+        """当前可恢复状态快照（不含消息历史），供 SessionStore 落盘。"""
+        return {
+            "todo": self.todo.to_json(),
+            "target_chars": self.target_chars,
+            "outline_confirmed": self._outline_confirmed,
+            "draft": self.draft.dump_state(),
+            "research_notes": self.research_notes,
+            "section_digests": self.section_digests,
+            "issued_cells": self._issued_cells,
+        }
+
+    def restore(self, state: dict[str, Any]) -> None:
+        """从上次会话快照恢复状态；坏块跳过，尽可能多恢复。"""
+        self.todo.load_json(state.get("todo"))
+        try:
+            self.target_chars = int(state.get("target_chars", self.target_chars))
+        except (TypeError, ValueError):
+            pass
+        self._outline_confirmed = state.get("outline_confirmed") is True
+        # 恢复后消息历史从零开始，「用户是否已回应提纲」以恢复后的首条用户输入为准
+        self._outline_submitted_at = -1
+        draft_state = state.get("draft")
+        if isinstance(draft_state, dict):
+            self.draft.load_state(draft_state)
+        if isinstance(state.get("research_notes"), list):
+            self.research_notes = state["research_notes"]
+        if isinstance(state.get("section_digests"), dict):
+            self.section_digests = state["section_digests"]
+        if isinstance(state.get("issued_cells"), list):
+            self._issued_cells = state["issued_cells"]
 
     def _progress(self) -> str:
         missing = self.draft.missing_sections()

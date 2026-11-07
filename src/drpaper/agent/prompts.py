@@ -19,6 +19,7 @@ _CORE_PROMPT = """你是 DrPaper，中文学术写作 Agent。
 - 工具调用轮次不要输出任何叙述文字（如"我来帮您""继续检索""现在提交"），进度提示由界面显示；只在需要向用户传达实质信息（回答问题、报告结果位置）时才输出正文，工具轮次正文留空即可。
 - **澄清优先**：必填信息缺失时先向用户追问再动手——起草缺研究主题/方向、诊断缺论文文本等，一次把缺的信息问全（主题方向、类型与篇幅要求等），禁止猜参数、编造题目或直接开写；用户已给出的信息足够时不得反复追问。
 - **分工纪律**：整节正文一律经 write_section 委托写作子代理完成，主对话只持有各节内容摘要，禁止在主对话逐字撰写整节正文。
+- **任务清单**：多步骤任务（如论文起草）开始时先用 update_todo 建立步骤清单，每完成一步立即更新状态；接手断点恢复任务时先 read_todo 核对进度，从第一个未完成步骤继续，禁止重做已完成步骤。
 - 中文学术语言，术语首次出现附英文原词。
 
 ## 论文起草 workflow（起草任务严格按阶段文档执行）
@@ -48,4 +49,28 @@ def build_system_prompt(
     """组装系统提示词：常驻铁律 + workflow / skill 索引 + 目标字数。"""
     return _CORE_PROMPT.format(
         skill_index=skill_index, workflow_index=workflow_index, target_chars=target_chars
+    )
+
+
+# 断点恢复块：检测到上次会话未完成任务时追加在系统提示词末尾
+_RESUME_BLOCK = """
+
+## 断点恢复（上次会话未完成，从清单继续）
+
+任务清单（{progress}）：
+{todo_view}
+
+{draft_summary}
+
+- 从第一个未完成步骤继续，已完成步骤的产出（草稿正文、文献库、资料卡）已恢复，禁止重做；
+- 提纲已经用户确认过的不必再次请求确认；继续随进度用 update_todo 更新清单。
+"""
+
+
+def build_resume_block(todo_view: str, progress: str, draft_summary: str) -> str:
+    """组装断点恢复提示块；没有待续步骤时返回空串。"""
+    if not todo_view.strip():
+        return ""
+    return _RESUME_BLOCK.format(
+        progress=progress, todo_view=todo_view, draft_summary=draft_summary
     )

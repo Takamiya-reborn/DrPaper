@@ -301,6 +301,51 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_todo",
+            "description": "读取当前任务清单（步骤 + 状态）与完成进度。"
+            "接手系统提示词中标注的未完成任务（断点恢复）时先调用本工具确认进度；"
+            "清单内容已在上下文中或刚更新过时无需重复调用。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_todo",
+            "description": "写入/更新任务清单（整体替换）。多步骤任务（如论文起草）开始时建立清单："
+            "按执行顺序列出各步，当前步 in_progress、其余 pending；"
+            "每完成一步立即更新该步为 completed 并把下一步置为 in_progress，禁止攒到最后一次性更新。"
+            "状态只有三种：pending / in_progress / completed。"
+            "清单会持久化到磁盘：进程中断后重启，据此从第一个未完成步骤继续，不重做已完成步骤。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "完整步骤列表（整体替换现有清单），按执行顺序",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "content": {
+                                    "type": "string",
+                                    "description": "步骤内容，动宾短语，如 '调研检索增强生成相关文献'",
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "description": "该步状态：pending / in_progress / completed",
+                                },
+                            },
+                            "required": ["content", "status"],
+                        },
+                    },
+                },
+                "required": ["steps"],
+            },
+        },
+    },
 ]
 
 # ---- 结果提示文案（与 schema 描述同属对模型的指令）----

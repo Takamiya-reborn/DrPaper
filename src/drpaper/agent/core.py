@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from drpaper.agent.prompts import build_system_prompt
+from drpaper.agent.prompts import build_resume_block, build_system_prompt
 from drpaper.agent.schemas import TOOL_SCHEMAS
+from drpaper.agent.session import SessionStore
 from drpaper.agent.tools import ToolBox
 from drpaper.export.style_profile import StyleProfile
 from drpaper.literature.aggregator import default_aggregator
@@ -47,16 +49,58 @@ class PaperAgent:
             skill_index=self._skill_index,
             workflows=workflows,
             workflow_index=self._workflow_index,
+            store=SessionStore(self.output_dir),
             messages=self.messages,
             target_chars=self.target_chars,
         )
+        resume_block = self._restore_session()
+        self._toolbox.resume_block = resume_block
+        self.resumed = bool(resume_block)  # 启动时是否从上次会话恢复（CLI 提示用）
         self.messages.append(
             {
                 "role": "system",
                 "content": build_system_prompt(
                     self._skill_index, self._workflow_index, self.target_chars
-                ),
+                )
+                + resume_block,
             }
+        )
+
+    def _restore_session(self) -> str:
+        """读取磁盘会话快照恢复状态，返回断点恢复提示块（无可续任务时为空串）。"""
+        store: SessionStore = self._toolbox.store
+        state = store.load()
+        if not state:
+            return ""
+        try:
+            self._toolbox.restore(state)
+        except Exception as exc:  # noqa: BLE001 - 快照损坏时不带病恢复，重新开始
+            print(f"[警告] 会话状态恢复失败，已重新开始: {exc}", file=sys.stderr)
+            return ""
+        todo = self._toolbox.todo
+        if not todo.steps or todo.done == todo.total:
+            return ""
+        draft = self._toolbox.draft
+        if draft.title:
+            done = len(draft.sections) - len(draft.missing_sections())
+            confirmed = "提纲已确认" if self._toolbox._outline_confirmed else "提纲待用户确认"
+            draft_summary = (
+                f"已恢复草稿「{draft.title}」：大纲共 {len(draft.sections)} 节、"
+                f"已完成 {done} 节（{confirmed}），文献库 {len(draft.references)} 条。"
+            )
+        else:
+            draft_summary = "上次会话尚未提交提纲。"
+        return build_resume_block(todo.render(), todo.progress(), draft_summary)
+
+    @property
+    def resume_notice(self) -> str | None:
+        """CLI 启动提示：检测到可续任务时给出接续指引。"""
+        if not self.resumed:
+            return None
+        todo = self._toolbox.todo
+        return (
+            f"检测到上次未完成的任务（{todo.progress()}），"
+            "草稿与文献库已恢复：直接发送「继续」即可接续，无需重做已完成步骤。"
         )
 
     @property

@@ -82,10 +82,22 @@
 
 ## P1-4 任务清单持久化与断点续跑
 
-- [ ] 实现 TodoList 持久化：步骤状态（pending / in_progress / completed）存磁盘（JSON）
-- [ ] 模型可通过工具读写该清单；每完成一步立即更新
-- [ ] 支持 agent 中断后从清单恢复继续
-- [ ] 验证：任务进行到一半杀掉进程，重启后 agent 能读取清单继续，不重做已完成步骤
+- [x] 实现 TodoList 持久化：步骤状态（pending / in_progress / completed）存磁盘（JSON）
+      （agent/todo.py 清单模型 + agent/session.py 快照落盘 output_dir/session.json；
+      ToolBox.snapshot() 组装清单+草稿+文献库+确认门禁等全部可恢复状态）
+- [x] 模型可通过工具读写该清单；每完成一步立即更新
+      （read_todo / update_todo 两个工具；update_todo 整体替换并校验三种状态；
+      handlers 统一包裹：每次工具调用成功后快照即时落盘，子代理内部调用不触发）
+- [x] 支持 agent 中断后从清单恢复继续
+      （PaperAgent 启动时读快照恢复 ToolBox 状态，系统提示词追加「断点恢复」块：
+      清单复选框视图 + 草稿进度 + 禁止重做已完成步骤；CLI 启动时给出接续提示；
+      快照损坏/缺失/清单全部完成时不注入，正常重新开始）
+- [x] 验证：任务进行到一半杀掉进程，重启后 agent 能读取清单继续，不重做已完成步骤
+      （tests/test_p1_todo_resume.py 9 项 + 既有套件 41/41；
+      scripts/verify_p1_todo_resume.py 真实 LLM 4/4：清单随 update_todo 即时落盘、
+      第 1 节完成后模拟进程被杀、重启恢复草稿与清单（第 1 节 534 字逐字一致、
+      提纲确认门禁一并恢复）、「继续」后直接续写剩余节并导出 docx——
+      无 begin_draft 复现、接手阶段未重做第 1 节，全程仅 1 次引言修订且为审校驱动）
 
 ## P2-1 上下文压缩（compaction）
 

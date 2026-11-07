@@ -147,6 +147,9 @@ def main() -> None:
     )
     for warning in agent.library_warnings:
         print(warning, file=sys.stderr)
+    notice = agent.resume_notice
+    if notice:
+        print(f"\n{notice}")
     # 会话累计 token：输入 / 输出
     usage_total = {"prompt": 0, "completion": 0}
     # 状态行实时计数器：已结算轮次 + 当前轮实时用量
