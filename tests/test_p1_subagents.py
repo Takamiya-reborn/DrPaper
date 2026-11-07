@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from fake_llm import agent_with, chunk, tool_call
+from fake_llm import agent_with, chunk, tool_call, tool_results
 
 from drpaper.agents.writer.agent import SYSTEM as WRITER_SYSTEM
 from drpaper.literature.base import Paper
@@ -41,11 +41,7 @@ class _StubProvider:
 
 
 def _tool_results(messages: list[dict]) -> list[dict]:
-    return [
-        json.loads(m["content"])
-        for m in messages
-        if m.get("role") == "tool" and m["content"].lstrip().startswith("{")
-    ]
+    return tool_results(messages)
 
 
 def _main_text(agent_messages: list[dict]) -> str:

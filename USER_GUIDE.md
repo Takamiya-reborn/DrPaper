@@ -133,11 +133,12 @@ sources:
 | --------------- | ----------------------------------------------------------- |
 | `profiles\`     | 自定义 Word 排版样式；放入 `default.yaml` 可作为默认样式    |
 | `skills\`       | 自定义 Agent 技能；每个技能目录必须包含 `SKILL.md`          |
+| `workflows\`    | 自定义工作流程文档；调整起草各阶段的验收标准与注意事项，只改 Markdown |
 | `sources.yaml`  | 开关和调整 arXiv、OpenAlex、Semantic Scholar 以及本地文献库 |
 | `eval.yaml`     | 调整论文质量评估的权重和阈值                                |
 | `baseline.yaml` | 保存自己的质量评分基线                                      |
 
-第一次使用建议先不要修改这些文件，确认基本流程可运行后，再按 README 中的[自定义排版样式](README.md#自定义排版样式)和[自定义 skills](README.md#自定义-skills)操作。升级发行版时，建议先备份 exe 同级的 `.env`、`profiles\`、`skills\`、`sources.yaml` 以及 `.output\`，再替换程序文件。
+第一次使用建议先不要修改这些文件，确认基本流程可运行后，再按 README 中的[自定义排版样式](README.md#自定义排版样式)、[自定义 skills](README.md#自定义-skills)和[自定义 workflow](README.md#自定义-workflow)操作。升级发行版时，建议先备份 exe 同级的 `.env`、`profiles\`、`skills\`、`workflows\`、`sources.yaml` 以及 `.output\`，再替换程序文件。
 
 ## 常见问题
 

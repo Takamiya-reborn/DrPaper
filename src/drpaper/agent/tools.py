@@ -4,6 +4,8 @@ ToolBox 只做参数解析与结果装配，具体能力分层委托：
 文献呈现 literature.present、字数与大纲校验 paper.draft、
 历史折叠 agent.history、文件命名 export.naming、skill 去重 skills.manager、
 公式转换 export.math、LaTeX 渲染 export.tex_writer；
+流程阶段文档按需注入 workflows.manager；
+系统性调研、逐节写作与审校分别委托 agents/ 下的三个子代理，
 系统性调研、逐节写作与审校分别委托 agents/ 下的三个子代理，
 主对话只回收结构化摘要，不持有子代理的中间过程。
 """
@@ -46,6 +48,7 @@ from drpaper.paper.markdown_parser import TableNode, extract_citations, parse
 from drpaper.paper.metrics import MetricStore, estimate_graded, expected_cell_errors
 from drpaper.paper.wordcount import count_chars
 from drpaper.skills.manager import SkillManager
+from drpaper.workflows import WorkflowManager
 
 
 def _result(**fields: Any) -> str:
@@ -68,6 +71,8 @@ class ToolBox:
     style: StyleProfile
     skills: SkillManager
     skill_index: str  # 系统提示词的 skill 索引，改目标字数后需重建提示词
+    workflows: WorkflowManager  # 流程文档管理：进入新阶段时随工具结果注入阶段文档
+    workflow_index: str  # 系统提示词的 workflow 索引，改目标字数后需重建提示词
     messages: list[dict[str, Any]] = field(default_factory=list)
     target_chars: int = 5000
     metrics: MetricStore = field(default_factory=MetricStore)
@@ -85,8 +90,8 @@ class ToolBox:
     _outline_submitted_at: int = -1  # begin_draft 成功时的历史长度，用于识别用户是否已回应
 
     def handlers(self) -> dict[str, Any]:
-        """工具名 → 处理函数，供 LLM 循环执行。"""
-        return {
+        """工具名 → 处理函数，供 LLM 循环执行；统一包裹阶段文档注入。"""
+        raw: dict[str, Any] = {
             "search_literature": self._search_literature,
             "set_target_chars": self._set_target_chars,
             "estimate_metric": self._estimate_metric,
@@ -102,6 +107,17 @@ class ToolBox:
             "export_docx": self._export_docx,
             "load_skill": self._load_skill,
         }
+        return {name: self._with_stage_doc(name, fn) for name, fn in raw.items()}
+
+    def _with_stage_doc(self, name: str, fn: Any) -> Any:
+        """调用后把当前阶段的流程文档附在工具结果尾部（WorkflowManager 去重）。"""
+
+        def wrapped(args: dict[str, Any]) -> str:
+            result = fn(args)
+            doc = self.workflows.enter_doc(name)
+            return f"{result}\n\n---\n\n{doc}" if doc else result
+
+        return wrapped
 
     # ---- 文献检索 ----
 
@@ -150,7 +166,9 @@ class ToolBox:
                 status="ok", target_chars=target, note="与当前目标一致，未变更"
             )
         self.target_chars = target
-        self.messages[0]["content"] = build_system_prompt(self.skill_index, target)
+        self.messages[0]["content"] = build_system_prompt(
+            self.skill_index, self.workflow_index, target
+        )
         return _result(status="ok", target_chars=target)
 
     # ---- 指标估计 ----

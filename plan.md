@@ -62,11 +62,23 @@
 
 ## P1-3 Workflow 文档化（Skills 式）
 
-- [ ] 将每个 workflow（如"选题→初稿"）写成 Markdown 流程文档：阶段划分、
+- [x] 将每个 workflow（如"选题→初稿"）写成 Markdown 流程文档：阶段划分、
       每阶段验收标准、可用工具、注意事项
-- [ ] 运行时按需注入当前阶段的流程文档（progressive disclosure），不整篇塞入
-- [ ] 改流程只改 Markdown，不改代码
-- [ ] 验证：调整某阶段的验收标准后，不改任何 Python 代码即可生效
+      （`workflows/builtin/paper-drafting/`：WORKFLOW.md 总则 + stages/ 六个阶段文档
+      01-需求确认 → 06-导出交付；原系统提示词的固定流程步骤 1-6 全部迁入，
+      prompts.py 只保留阶段链索引与全局铁律）
+- [x] 运行时按需注入当前阶段的流程文档（progressive disclosure），不整篇塞入
+      （ToolBox 统一包裹工具处理器：模型调用某阶段入口工具（frontmatter entry_tools）
+      即视为进入该阶段，首次进入时该阶段文档随工具结果注入一次；
+      阶段只前进不回退，同阶段重入/修订不重复灌历史；用户目录 ~/.drpaper/workflows
+      可同名覆盖内置版，与 skills 同款两级加载）
+- [x] 改流程只改 Markdown，不改代码
+      （阶段顺序=阶段文档文件名序号；增删阶段、调整入口工具、改验收标准全是文档操作）
+- [x] 验证：调整某阶段的验收标准后，不改任何 Python 代码即可生效
+      （tests/test_p1_workflow_docs.py 7 项 + 既有套件 33/33；
+      scripts/verify_p1_workflow.py 真实 LLM 3/3：阶段文档随工具结果注入且模型停在
+      提纲确认节点、复制内置文档仅给「提纲与确认」阶段追加一条验收标准后真实模型照做
+      （回复以【提纲待确认】开头，零代码改动）、系统提示词已无内嵌流程仅含阶段链索引）
 
 ## P1-4 任务清单持久化与断点续跑
 

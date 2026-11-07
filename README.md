@@ -51,6 +51,7 @@
 
 - **多轮修改与提问**：生成后可继续要求修改，或提问"摘要怎么写"之类的方法问题
 - **按需加载 skills**：论文专精技能（起草、诊断、润色、实验设计、查新、文献综述、研究指导）平时只在系统提示词中占一行索引，任务匹配时才由模型调用 `load_skill` 加载完整内容，显著降低 token 消耗
+- **Workflow 文档化**：起草流程的阶段划分、验收标准与注意事项全部是 Markdown（进入阶段时自动注入对应文档，渐进披露）；调整流程只改文档不改代码
 
 ## 快速开始
 
@@ -256,6 +257,42 @@ description: 一句话说明何时触发（agent 据此决定是否加载）
 
 启动后 agent 的系统提示词索引会自动出现该技能，命中时模型通过 `load_skill` 加载完整内容。
 
+### 自定义 workflow
+
+起草流程（选题→初稿→导出）不住在代码里：阶段划分、每阶段的验收标准、可用工具与注意事项全部是 Markdown 文档，agent 进入新阶段时该阶段文档自动随工具结果注入（渐进披露，不整篇常驻）。调整流程只改文档，不改源码、无需重新打包（与内置 workflow 合并加载，同名时用户版覆盖内置版）：
+
+| 运行方式 | 用户 workflow 目录         |
+| -------- | -------------------------- |
+| 打包 exe | exe 同级的 `workflows/`    |
+| 源码运行 | `~/.drpaper/workflows/`    |
+
+```
+<用户 workflow 目录>/
+  my-flow/
+    WORKFLOW.md         # 必须，frontmatter 需含 name 与 description，正文为总则
+    stages/
+      01-clarify.md     # 阶段文档，文件名序号决定阶段顺序
+      02-research.md
+      ...
+```
+
+阶段文档格式（与内置 `paper-drafting` 一致）：
+
+```markdown
+---
+stage: 阶段名
+entry_tools: tool_a, tool_b   # 进入该阶段的入口工具（模型调用即视为进入），可省略
+---
+
+## 阶段目标
+## 验收标准   # 未全部满足不得进入下一阶段
+## 可用工具
+## 注意事项
+## 进入下一阶段
+```
+
+例如把提纲阶段的验收标准改严（追加一行"提纲须经用户逐节点评后才可动笔"），下次会话即生效——agent 会在提纲确认节点等到满足新标准为止。
+
 自定义排版样式、检索源配置、评估配置与 skills 同款模式：打包运行放 **exe 同级目录**（`profiles/`、`sources.yaml`、`eval.yaml`、`baseline.yaml`），源码运行为 `~/.drpaper/` 下对应路径，均无需重新打包。
 
 ## 开发者指南
@@ -306,6 +343,9 @@ src/drpaper/
   skills/                # 【技能层】论文专精 skills，按需加载
     manager.py           #   SkillManager：索引 + 渐进式加载
     builtin/             #   内置技能包（SKILL.md + references/）
+  workflows/             # 【流程层】工作流文档：阶段划分与验收标准全在 Markdown，改流程不改代码
+    manager.py           #   WorkflowManager：阶段链索引 + 进入阶段时注入阶段文档
+    builtin/             #   内置 workflow（WORKFLOW.md 总则 + stages/ 阶段文档）
   export/                # 【导出层】交付格式渲染
     style_profile.py     #   样式档案：内置+用户两级目录的排版规范加载
     profiles/            #   内置排版样式档案（YAML）

@@ -56,3 +56,16 @@ def agent_with(rounds: list[list[SimpleNamespace]], tmp_path) -> PaperAgent:
     )
     agent.llm._client = FakeStreamClient(rounds)
     return agent
+
+
+def tool_results(messages: list[dict]) -> list[dict]:
+    """解析主循环 tool 消息里的 JSON 结果。
+
+    进入新 workflow 阶段时流程文档附在 JSON 之后（\n\n---\n\n 分隔），截断后解析。
+    """
+    results = []
+    for m in messages:
+        if m.get("role") != "tool" or not m["content"].lstrip().startswith("{"):
+            continue
+        results.append(json.loads(m["content"].split("\n\n---\n\n", 1)[0]))
+    return results
