@@ -18,10 +18,19 @@ def tool_call(name: str, arguments: dict, index: int = 0) -> SimpleNamespace:
     )
 
 
-def chunk(content=None, tool_calls=None, finish=None) -> SimpleNamespace:
+def chunk(content=None, tool_calls=None, finish=None, usage=None) -> SimpleNamespace:
     delta = SimpleNamespace(content=content, tool_calls=tool_calls)
     return SimpleNamespace(
-        usage=None, choices=[SimpleNamespace(finish_reason=finish, delta=delta)]
+        usage=usage, choices=[SimpleNamespace(finish_reason=finish, delta=delta)]
+    )
+
+
+def usage(prompt_tokens: int, completion_tokens: int = 10) -> SimpleNamespace:
+    """构造流式响应里的用量块（openai 格式），供压缩触发测试用。"""
+    return SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
     )
 
 

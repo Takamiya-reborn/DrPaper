@@ -12,7 +12,7 @@ from typing import Any
 
 from drpaper.agents.base import Subagent, error, result
 from drpaper.llm.client import LLMClient
-from drpaper.llm.types import ChatCallbacks, Tool
+from drpaper.llm.types import ChatCallbacks, ContextCompactor, Tool
 
 SYSTEM = """你是论文审校专家，对一篇论文的已提交章节做整体审校。
 
@@ -82,6 +82,7 @@ class ReviewerAgent:
 
     llm: LLMClient
     max_rounds: int = 6
+    compactor: ContextCompactor | None = None
     _submitted: dict[str, Any] = field(default_factory=dict, init=False)
 
     def run(self, task: str, callbacks: ChatCallbacks | None = None) -> dict[str, Any]:
@@ -112,7 +113,12 @@ class ReviewerAgent:
             return result(status="ok", note="意见列表已提交，审校结束")
 
         agent = Subagent(
-            self.llm, SYSTEM, _TOOLS, {"submit_review": _submit}, self.max_rounds
+            self.llm,
+            SYSTEM,
+            _TOOLS,
+            {"submit_review": _submit},
+            max_rounds=self.max_rounds,
+            compactor=self.compactor,
         )
         reply = agent.run(task, callbacks)
         if not self._submitted:

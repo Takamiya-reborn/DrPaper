@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
 from drpaper.literature.authority import authority_score
 from drpaper.literature.base import Paper
@@ -26,14 +26,6 @@ from drpaper.literature.sources_config import SourceConfig, load_sources_config
 
 # 注册表：源名 → 提供者构造函数（接收源配置）；新增数据源在此登记
 _PROVIDER_FACTORIES: dict[str, Callable[[SourceConfig], Any]] = {}
-
-
-class _Provider(Protocol):
-    """聚合器所需的检索源最小接口。"""
-
-    name: str
-
-    def search(self, query: str, max_results: int) -> list[Paper]: ...
 
 
 @dataclass

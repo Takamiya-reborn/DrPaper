@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
 from drpaper.paper.markdown_parser import CITATION_PATTERN
 
@@ -61,11 +61,6 @@ def scan_claims(sections: list[tuple[str, str]]) -> list[ClaimFinding]:
                     )
                 )
     return findings
-
-
-def finding_dict(finding: ClaimFinding) -> dict:
-    """转 JSON 可序列化 dict（工具返回用）。"""
-    return asdict(finding)
 
 
 def _match_kind(sentence: str) -> str | None:

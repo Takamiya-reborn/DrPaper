@@ -12,7 +12,7 @@ from typing import Any
 
 from drpaper.agents.base import Subagent, error, result
 from drpaper.llm.client import LLMClient
-from drpaper.llm.types import ChatCallbacks, Tool, ToolHandler
+from drpaper.llm.types import ChatCallbacks, ContextCompactor, Tool, ToolHandler
 
 SYSTEM = """你是文献调研员，围绕给定课题检索真实学术文献并汇总资料卡。
 
@@ -96,6 +96,7 @@ class ResearchAgent:
     llm: LLMClient
     search: ToolHandler  # 主循环的 search_literature 处理器（登记共享文献库）
     max_rounds: int = 8
+    compactor: ContextCompactor | None = None
     _submitted: dict[str, Any] = field(default_factory=dict, init=False)
 
     def run(self, topic: str, callbacks: ChatCallbacks | None = None) -> dict[str, Any]:
@@ -131,6 +132,7 @@ class ResearchAgent:
             _TOOLS,
             {"search_literature": self.search, "submit_research": _submit},
             max_rounds=self.max_rounds,
+            compactor=self.compactor,
         )
         reply = agent.run(topic, callbacks)
         if not self._submitted:

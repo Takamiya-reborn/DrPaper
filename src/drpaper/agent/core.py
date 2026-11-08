@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from drpaper.agent.compaction import Compactor, context_window
 from drpaper.agent.prompts import build_resume_block, build_system_prompt
 from drpaper.agent.schemas import TOOL_SCHEMAS
 from drpaper.agent.session import SessionStore
@@ -53,6 +54,13 @@ class PaperAgent:
             messages=self.messages,
             target_chars=self.target_chars,
         )
+        # 上下文压缩器：对消息历史无记忆，主循环与子代理共用同一个实例
+        self._compactor = Compactor(
+            llm=self.llm,
+            window_tokens=context_window(),
+            state_snapshot=self._toolbox.state_block,
+        )
+        self._toolbox.compactor = self._compactor
         resume_block = self._restore_session()
         self._toolbox.resume_block = resume_block
         self.resumed = bool(resume_block)  # 启动时是否从上次会话恢复（CLI 提示用）
@@ -111,12 +119,15 @@ class PaperAgent:
     def chat(self, user_input: str, callbacks: ChatCallbacks | None = None) -> str:
         """处理一轮用户输入，返回最终回复文本。"""
         self._toolbox.callbacks = callbacks  # 子代理透传工具事件、单独统计 token
+        self._toolbox.note_user_turn()  # 真实用户输入解锁提纲确认（与压缩后的历史无关）
+        self._compactor.usage_cb = callbacks.on_usage if callbacks else None
         self.messages.append({"role": "user", "content": user_input})
         reply = self.llm.chat(
             self.messages,
             TOOL_SCHEMAS,
             self._toolbox.handlers(),
             callbacks=callbacks,
+            compactor=self._compactor,
         )
         if reply:  # 空回复不进历史
             self.messages.append({"role": "assistant", "content": reply})

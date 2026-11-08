@@ -8,11 +8,22 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 Message = dict[str, Any]
 Tool = dict[str, Any]
 ToolHandler = Callable[[dict[str, Any]], str]
+
+
+class ContextCompactor(Protocol):
+    """上下文压缩器协议：agent loop 每轮请求前调用，必要时就地折叠历史。"""
+
+    def before_round(self, messages: list[Message], prompt_tokens: int) -> bool:
+        """判断上下文占用是否超阈值，超了就把旧历史折叠为摘要（就地替换）。
+
+        prompt_tokens 为上一轮请求的实测输入 token 数（0 表示尚无实测，
+        实现方需按消息体量自行估算）；返回是否发生了压缩。
+        """
 
 
 @dataclass

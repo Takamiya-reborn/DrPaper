@@ -45,6 +45,7 @@ from drpaper.export.tex_writer import export_tex
 from drpaper.literature.base import SearchProvider
 from drpaper.literature.present import paper_card
 from drpaper.llm.client import ChatCallbacks, LLMClient
+from drpaper.llm.types import ContextCompactor
 from drpaper.paper.draft import Draft, Section, parse_outline
 from drpaper.paper.markdown_parser import TableNode, extract_citations, parse
 from drpaper.paper.metrics import MetricStore, estimate_graded, expected_cell_errors
@@ -85,6 +86,8 @@ class ToolBox:
     baseline: dict[str, float] = field(default_factory=load_baseline)
     # 当前 chat 的界面回调，PaperAgent.chat 每轮注入；子代理透传工具事件
     callbacks: ChatCallbacks | None = None
+    # 上下文压缩器：主循环与子代理共用（PaperAgent 注入）
+    compactor: ContextCompactor | None = None
     research_notes: list[dict[str, Any]] = field(default_factory=list)  # 调研资料卡（编号+标题+要点）
     section_digests: dict[str, str] = field(default_factory=dict)  # 各节内容摘要（主循环持有的"各章摘要"）
     subagent_usage: dict[str, int] = field(
@@ -92,7 +95,10 @@ class ToolBox:
     )  # 子代理 token 用量（与主循环分开统计）
     _issued_cells: list[str] = field(default_factory=list)
     _outline_confirmed: bool = False  # 提纲确认硬门禁：确认前禁止 submit_section / write_section
-    _outline_submitted_at: int = -1  # begin_draft 成功时的历史长度，用于识别用户是否已回应
+    # 提纲已提交且尚未等到用户表态：为真时 confirm_outline 拒绝自行确认。
+    # 用标记而非历史索引——上下文压缩会改写历史，循环内注入的纠偏提示
+    # 也是 user 角色，都不能算用户表态；只有真实用户输入算（note_user_turn）
+    _awaiting_outline_reply: bool = False
 
     def handlers(self) -> dict[str, Any]:
         """工具名 → 处理函数，供 LLM 循环执行；统一包裹阶段文档注入。"""
@@ -255,7 +261,9 @@ class ToolBox:
         topic = str(args.get("topic", "")).strip()
         if not topic:
             return _error("topic 不能为空")
-        agent = ResearchAgent(llm=self.llm, search=self._search_literature)
+        agent = ResearchAgent(
+            llm=self.llm, search=self._search_literature, compactor=self.compactor
+        )
         outcome = agent.run(topic, callbacks=self._sub_callbacks())
         if outcome["status"] != "ok":
             return _error(outcome["reason"])
@@ -284,6 +292,7 @@ class ToolBox:
             draft=self.draft,
             estimate_metric=self._estimate_metric,
             section_name=name,
+            compactor=self.compactor,
         )
         outcome = writer.run(self._writer_task(section, guidance), callbacks=self._sub_callbacks())
         if outcome["status"] != "ok":
@@ -342,7 +351,7 @@ class ToolBox:
         if not written:
             return _error("尚无已提交的章节内容，先 write_section 再审校")
         focus = str(args.get("focus", "")).strip()
-        reviewer = ReviewerAgent(llm=self.llm)
+        reviewer = ReviewerAgent(llm=self.llm, compactor=self.compactor)
         outcome = reviewer.run(
             self._reviewer_task(written, focus), callbacks=self._sub_callbacks()
         )
@@ -384,7 +393,7 @@ class ToolBox:
         self.draft.begin(title, sections)
         # 重新提交提纲即重置确认状态：每次动笔前都要过一遍用户确认
         self._outline_confirmed = False
-        self._outline_submitted_at = len(self.messages)
+        self._awaiting_outline_reply = True
         fields: dict[str, Any] = {
             "status": "pending_confirmation",
             "sections": [{"name": s.name, "budget": s.budget} for s in sections],
@@ -405,16 +414,49 @@ class ToolBox:
             return _error("尚未提交提纲，应先调用 begin_draft")
         if self._outline_confirmed:
             return _result(status="ok", note="提纲此前已确认，可直接 submit_section")
-        replied = any(
-            m.get("role") == "user" for m in self.messages[self._outline_submitted_at + 1 :]
-        )
-        if not replied:
+        if self._awaiting_outline_reply:
             return _error(
                 "用户尚未对提纲作出回应，禁止自行确认；"
                 "请结束本轮，向用户展示提纲并等待回复"
             )
         self._outline_confirmed = True
         return _result(status="ok", note="提纲已确认，开始逐节 submit_section")
+
+    def note_user_turn(self) -> None:
+        """记录一次真实用户输入（PaperAgent.chat 开头调用）：解锁提纲确认。
+
+        与消息历史无关——上下文压缩会改写历史，循环内注入的纠偏提示也是
+        user 角色，都不能算用户表态；只有真实用户输入算。
+        """
+        self._awaiting_outline_reply = False
+
+    def state_block(self) -> str:
+        """压缩时随摘要一并注入的权威状态块：清单、提纲确认与文献编号对照。
+
+        这些状态有 ToolBox 里的权威副本，不依赖模型转述，从机制上保证
+        压缩后不遗忘已确认的提纲、字数要求与引用编号。
+        """
+        parts: list[str] = []
+        if self.todo.steps:
+            parts.append(f"任务清单（{self.todo.progress()}）：\n{self.todo.render()}")
+        if self.draft.title:
+            confirmed = "提纲已确认" if self._outline_confirmed else "提纲待用户确认"
+            done = len(self.draft.sections) - len(self.draft.missing_sections())
+            outline = "\n".join(
+                f"- {s.name}（预算 {s.budget or '不限'} 字{'，已完成' if s.content else ''}）"
+                for s in self.draft.sections
+            )
+            parts.append(
+                f"当前草稿「{self.draft.title}」：目标 {self.target_chars} 字，"
+                f"{confirmed}，已完成 {done}/{len(self.draft.sections)} 节。大纲：\n{outline}"
+            )
+        if self.draft.references:
+            lines = "\n".join(
+                f"[{i}] {p.title}"
+                for i, p in enumerate(self.draft.references, start=1)
+            )
+            parts.append(f"文献库编号对照（引用编号以此为准）：\n{lines}")
+        return "\n\n".join(parts)
 
     def _submit_section(self, args: dict[str, Any]) -> str:
         if not self._outline_confirmed:
@@ -654,7 +696,7 @@ class ToolBox:
             pass
         self._outline_confirmed = state.get("outline_confirmed") is True
         # 恢复后消息历史从零开始，「用户是否已回应提纲」以恢复后的首条用户输入为准
-        self._outline_submitted_at = -1
+        self._awaiting_outline_reply = False
         draft_state = state.get("draft")
         if isinstance(draft_state, dict):
             self.draft.load_state(draft_state)

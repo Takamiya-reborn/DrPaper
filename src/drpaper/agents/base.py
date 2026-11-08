@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from drpaper.llm.client import LLMClient
-from drpaper.llm.types import ChatCallbacks, Tool, ToolHandler
+from drpaper.llm.types import ChatCallbacks, ContextCompactor, Tool, ToolHandler
 
 __all__ = ["Subagent", "error", "result"]
 
@@ -35,6 +35,7 @@ class Subagent:
     tools: list[Tool]
     handlers: dict[str, ToolHandler]
     max_rounds: int = 12
+    compactor: ContextCompactor | None = None  # 上下文压缩器（与主循环共用）
 
     def run(self, task: str, callbacks: ChatCallbacks | None = None) -> str:
         """在子代理自己的上下文里执行完整 agent loop，返回最终文本回复。
@@ -59,4 +60,5 @@ class Subagent:
             self.handlers,
             callbacks=forwarded,
             max_rounds=self.max_rounds,
+            compactor=self.compactor,
         )

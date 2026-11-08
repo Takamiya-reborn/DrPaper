@@ -15,7 +15,7 @@ from drpaper.agent.schemas import HINT_TOO_LONG, HINT_TOO_SHORT, TOOL_SCHEMAS
 from drpaper.agents.base import Subagent, error, result
 from drpaper.literature.present import paper_card
 from drpaper.llm.client import LLMClient
-from drpaper.llm.types import ChatCallbacks, Tool, ToolHandler
+from drpaper.llm.types import ChatCallbacks, ContextCompactor, Tool, ToolHandler
 from drpaper.paper.draft import Draft
 from drpaper.paper.markdown_parser import extract_citations
 from drpaper.paper.wordcount import count_chars
@@ -97,6 +97,7 @@ class WriterAgent:
     )
     section_name: str  # 分配给本次写作的节名
     max_rounds: int = 14
+    compactor: ContextCompactor | None = None
     _saved: dict[str, Any] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
@@ -168,6 +169,7 @@ class WriterAgent:
                 "save_section": _save,
             },
             max_rounds=self.max_rounds,
+            compactor=self.compactor,
         )
         reply = agent.run(task, callbacks)
         if not self._saved:

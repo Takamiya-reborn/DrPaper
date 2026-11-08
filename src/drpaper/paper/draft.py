@@ -111,10 +111,6 @@ class Draft:
         """尚未提交内容的节名列表。"""
         return [s.name for s in self.sections if not s.content]
 
-    def section_chars(self, name: str) -> int:
-        """某节实际字数。"""
-        return count_chars(self.get_section(name).content)
-
     def total_chars(self) -> int:
         """全文实际字数（按各节已提交内容统计）。"""
         return sum(count_chars(s.content) for s in self.sections)

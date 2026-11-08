@@ -22,7 +22,7 @@ from openai import (
 )
 
 from drpaper.llm import anthropic_backend
-from drpaper.llm.types import ChatCallbacks, Message, Tool, ToolHandler
+from drpaper.llm.types import ChatCallbacks, ContextCompactor, Message, Tool, ToolHandler
 
 __all__ = ["ChatCallbacks", "LLMClient", "Message", "Tool", "ToolHandler"]
 
@@ -80,6 +80,7 @@ class LLMClient:
         handlers: dict[str, ToolHandler],
         callbacks: ChatCallbacks | None = None,
         max_rounds: int = 40,
+        compactor: ContextCompactor | None = None,
     ) -> str:
         """带工具调用的对话循环，返回最终助手回复文本。
 
@@ -87,14 +88,35 @@ class LLMClient:
         - 每轮模型请求工具则执行后继续，直到给出纯文本回复
         - 工具轮次正文为空是预期行为（界面负责状态提示），不算空回复
         - 同一工具重复相同错误达 _LOOP_BREAKS 次即熔断，重蹈覆辙超限则终止任务
+        - 每轮请求前经 compactor 检查上下文占用，超阈值时先把旧历史折叠为摘要
         """
         empty_retries = 0
         error_counts: dict[tuple[str, str], int] = {}  # (工具名, 错误结果) → 出现次数
         breaks = 0
+        # 最近一次请求的实测输入 token 数，供 compactor 判断窗口占用
+        last_prompt = 0
+        inner = callbacks or ChatCallbacks()
+
+        def _on_usage(prompt: int, completion: int, total: int) -> None:
+            nonlocal last_prompt
+            last_prompt = prompt
+            if inner.on_usage:
+                inner.on_usage(prompt, completion, total)
+
+        effective = ChatCallbacks(
+            on_text=inner.on_text,
+            on_first_token=inner.on_first_token,
+            on_round_start=inner.on_round_start,
+            on_tool_start=inner.on_tool_start,
+            on_tool_end=inner.on_tool_end,
+            on_usage=_on_usage,
+        )
         for _ in range(max_rounds):
-            if callbacks and callbacks.on_round_start:
-                callbacks.on_round_start()
-            content, tool_calls, finish = self._request(messages, tools, callbacks)
+            if compactor is not None:
+                compactor.before_round(messages, last_prompt)
+            if effective.on_round_start:
+                effective.on_round_start()
+            content, tool_calls, finish = self._request(messages, tools, effective)
 
             # 截断回复整体丢弃：截断的工具调用参数进历史会导致部分服务 400
             if finish == "length":
@@ -134,7 +156,7 @@ class LLMClient:
                         result = _LOOP_STUB
                     else:
                         result = _run_handler(
-                            handlers, slot["name"], slot["arguments"], callbacks
+                            handlers, slot["name"], slot["arguments"], effective
                         )
                     messages.append(
                         {"role": "tool", "tool_call_id": slot["id"], "content": result}
@@ -180,6 +202,24 @@ class LLMClient:
             f"（已达单次任务轮次上限 {max_rounds} 轮，任务未完成。"
             "请总结当前进度，或发送「继续」接续。）"
         )
+
+    def complete(
+        self,
+        messages: list[Message],
+        callbacks: ChatCallbacks | None = None,
+    ) -> str:
+        """无工具的单轮补全，返回正文；持续空回复时返回空串。
+
+        内部调用（上下文压缩摘要等）专用：与 chat 共用请求层（流式消费、
+        瞬时错误重试），只是不携带工具定义，也不会改动传入的消息列表。
+        """
+        for attempt in range(2):
+            content, _tool_calls, _finish = self._request(messages, [], callbacks)
+            if content.strip():
+                return content
+            if attempt == 0:
+                time.sleep(1)
+        return ""
 
     def _request(
         self,

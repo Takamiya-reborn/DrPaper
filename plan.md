@@ -101,12 +101,39 @@
 
 ## P2-1 上下文压缩（compaction）
 
-- [ ] 监控上下文长度，超过阈值（如 70% 窗口）时触发一次摘要调用，替换历史
-- [ ] 摘要必须保留：已确定的关键决策、未完成事项、用户明确的要求
-- [ ] 验证：超长任务中压缩后，agent 不遗忘已确认的提纲和写作要求
+- [x] 监控上下文长度，超过阈值（如 70% 窗口）时触发一次摘要调用，替换历史
+      （agent/compaction.py 无状态 Compactor：每轮请求前用实测输入 token 判断占用
+      是否超窗口 ×0.7（无实测则按消息体量估算，中英混排 ≈2 字符/token）；
+      触发即取「保留尾 6 条之前」为折叠区，折叠边界只落在 assistant.tool_calls 与
+      tool 结果对之间，永不拆对；旧历史整体替换为单条用户消息 =「压缩摘要」头 +
+      LLM 摘要 + 权威状态快照；client.chat() 每轮把实测 prompt_tokens 与 compactor
+      传给 Compactor.before_round，主循环与三个子代理共享同一 Compactor 实例）
+- [x] 摘要必须保留：已确定的关键决策、未完成事项、用户明确的要求
+      （摘要系统提示词规定保留顺序：关键决策/用户要求原话/未完成事项/关键工具结果；
+      权威状态为机械注入的结构化快照（清单复选框、目标字数、提纲已确认标记、
+      大纲节名与字数预算、文献库编号对照），与摘要冲突时以快照为准——
+      不依赖模型转述；提纲确认门禁改为「待用户回复」标志位 + chat() 开头
+      note_user_turn() 记录真实用户输入，压缩折叠历史后门禁依然正确）
+- [x] 验证：超长任务中压缩后，agent 不遗忘已确认的提纲和写作要求
+      （tests/test_p2_compaction.py 11 项 + 既有套件 55/55；
+      scripts/verify_p2_compaction.py 真实 LLM 3/3：压低触发线后续写轮开头即触发
+      折叠（全程 3 次，均为写作推进后再越限的合法折叠），折叠消息 3519 字且
+      权威状态/提纲已确认/写作要求原话「自称用本文」/全部节名俱在；
+      压缩后未重新 begin_draft、未重新请求确认，题目与提纲全程一致，7/7 节成稿
+      并导出 docx）
 
 ## P2-2 清理与回归
 
-- [ ] 删除所有被新机制取代的死代码
-- [ ] 全流程回归：从选题到导出 docx / PPT 大纲各跑一遍
+- [x] 删除所有被新机制取代的死代码
+      （AST 引用扫描后删除三处：draft.py 冗余 section_chars 字段、
+      claims.py 未用的 finding_dict 与 asdict 导入、literature/aggregator.py
+      从未实现的 _Provider Protocol；runtime.py 的 workspace_dir 基础设施
+      经用户确认刻意保留）
+- [x] 全流程回归：从选题到导出 docx / PPT 大纲各跑一遍
+      （tests/test_p2_regression.py 3 项离线全流程 + 既有套件 55/55；
+      scripts/verify_p2_regression.py 真实 LLM 3/3：选题→提纲→确认→逐节写作
+      →审校→收尾→导出全流程走通，题目「融合检索增强与不确定性校准的大语言
+      模型幻觉缓解框架」7 节全部成稿，docx/references.json/ppt_outline.json/
+      ppt_outline.md 齐全；PPT 大纲 12 页字段完整无署名字段；导出文件无作者
+      元数据（docx 核心属性 author/last_modified_by/title 为空，LaTeX 无 \author））
 - [ ] 验证：导出文件无作者元数据（沿用既有规则）
